@@ -40,6 +40,7 @@ class LoginResponse:
     error: Optional[str] = None
     message: Optional[str] = None
 
+@dataclass
 class Session:
     """
     This is the session that GETS SELECTED by the user. There are two cases of it-
@@ -48,12 +49,13 @@ class Session:
     When the user has already made that choice, and we store it in an environment variable, 
     and the user opens another terminal, so it gets called again
     """
-    api_key:str
-    user_id:str
-    email:str
-    cluster:str
-    session_token:str
-    expires_at:str
+    success:bool
+    session_token: Optional[str] = None
+    clusters: Optional[List[Cluster]] = None
+    expires_at: Optional[str] = None
+    # these two are present in the response when the user/API key is not found
+    message: Optional[str] = None
+    error: Optional[str] = None
 
 
 
