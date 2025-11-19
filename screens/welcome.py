@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+from textual import on, work
 from textual.app import ComposeResult
 from textual.containers import Container, Horizontal, VerticalScroll
 from textual.screen import Screen
 from textual.widgets import Button, Footer, Static
 
 from models.login import Session
+from screens.file_browser import FileBrowserScreen
 
 
 class WelcomeScreen(Screen):
@@ -73,6 +75,16 @@ class WelcomeScreen(Screen):
     #btn-upload {
         margin: 1 2;
     }
+    
+    #selected-path {
+        color: #94a3b8;
+        text-align: center;
+        width: 100%;
+        margin: 1;
+        padding: 1;
+        border: round #334155;
+        background: #0f172a;
+    }
     """
 
     def __init__(self, session: Session, **kwargs) -> None:
@@ -96,11 +108,24 @@ class WelcomeScreen(Screen):
             with Horizontal(id="button-row"):
                 yield Button("📤 UPLOAD", id="btn-upload", variant="success")
             
+            # Selected file path display
+            yield Static("No file selected", id="selected-path")
+            
         yield Footer()
     
-    def on_button_pressed(self, event: Button.Pressed) -> None:
-        """Handle button presses."""
-        if event.button.id == "btn-upload":
-            self.log("Upload button pressed!")
-            # TODO: Implement upload functionality
+    @on(Button.Pressed, "#btn-upload")
+    @work
+    async def handle_upload(self) -> None:
+        """Open file browser and show selected path."""
+        # Push the file browser screen and wait for result
+        file_path = await self.app.push_screen_wait(FileBrowserScreen())
+        
+        if file_path:
+            # Update the display with the selected file
+            self.query_one("#selected-path").update(f"📄 Selected: {file_path}")
+            self.log(f"File selected for upload: {file_path}")
+        else:
+            # User cancelled
+            self.query_one("#selected-path").update("No file selected")
+            self.log("File selection cancelled")
 
