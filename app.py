@@ -9,6 +9,7 @@ from textual.binding import Binding
 
 from api import TandemnAPI, Session
 from screens.login import LoginScreen
+from screens.welcome import WelcomeScreen
 # import logging
 
 # # Configure logging to write to a file
@@ -63,6 +64,10 @@ class TandemnCLIApp(App[None]):
             f"Session established: cluster={self.session.clusters}, "
             f"token_expires={self.session.expires_at}"
         )
+        
+        # Push the welcome screen to show the logo and success message
+        welcome = WelcomeScreen(session=self.session)
+        await self.push_screen(welcome)
 
     async def on_shutdown(self) -> None:
         await self.api.aclose()

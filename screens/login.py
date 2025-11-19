@@ -260,10 +260,15 @@ class LoginScreen(Screen):
         self.status.update(f"Connecting to cluster [b]{cluster.name}[/b]…")
 
         try:
-            session = await self.api.select_cluster(api_key, cluster.name)
+            session = await self.api.select_cluster(api_key, [cluster.name])
         except Exception as exc:  # noqa: BLE001
             self.status.update(f"[err]Cluster connect failed: {exc}[/]")
             return
+
+        # CHECK SUCCESS HERE!
+        if not session.success:
+             self.status.update(f"[err]{session.message or session.error}[/]")
+             return
 
         # fuse login + session info
         full_session = Session(
@@ -277,7 +282,7 @@ class LoginScreen(Screen):
         self.state.session = full_session
 
         self.status.update(
-            f"[ok]Connected to [b]{full_session.clusters}[/b]. "
+            f"[ok]Connected to [b]{full_session.clusters[0].name}[/b]. "
             f"Session expires at {full_session.expires_at}."
         )
 

@@ -92,14 +92,21 @@ class TandemnAPI:
         Response: {success: ...     you know} 
         """
         client = await self._get_client()
-        if isinstance(cluster_names, str):
-            cluster_names = [cluster_names]
+        
+        # If it's a list, take the first one for now to satisfy the 'cluster' field requirement
+        # If it's a string, just use it.
+        selected_cluster = cluster_names
+        if isinstance(cluster_names, list):
+             selected_cluster = cluster_names[0] if cluster_names else ""
+             
         response = await client.post(
             f"{self.base_url}/select-cluster",
-            json = {"apiKey": api_key, "clusters": cluster_names}
+            json = {"apiKey": api_key, "cluster": selected_cluster} # Changed 'clusters' to 'cluster'
         )
+        
         data = response.json()
         print("DEBUG: Response Data:", data)
+        
         if not data["success"] or not response.is_success:
             msg = data["message"] or data["error"] or "Cluster selection failed"
             return Session(
@@ -116,9 +123,9 @@ class TandemnAPI:
         # Assuming we have selected the correct cluster, we can now return the Session Object
         return Session(
             success = True,
-            session_token = data["session_token"],
+            session_token = data.get("sessionToken"),  # API uses camelCase
             clusters = clusters_list,
-            expires_at = data["expires_at"],
+            expires_at = data.get("expiresAt"),  # API uses camelCase
             message = data.get("message", None),
             error = data.get("error", None)
         )
