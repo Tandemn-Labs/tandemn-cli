@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 from textual.app import ComposeResult
-from textual.containers import Container, VerticalScroll
+from textual.containers import Container, Horizontal, VerticalScroll
 from textual.screen import Screen
-from textual.widgets import Footer, Static
+from textual.widgets import Button, Footer, Static
 
 from models.login import Session
 
@@ -38,6 +38,7 @@ class WelcomeScreen(Screen):
     #welcome-container {
         width: 100%;
         height: 100%;
+        layout: vertical;
         align: center middle;
     }
 
@@ -60,6 +61,17 @@ class WelcomeScreen(Screen):
         color: #e5e7eb;
         text-align: center;
         width: 100%;
+        margin-bottom: 2;
+    }
+    
+    #button-row {
+        width: 100%;
+        height: auto;
+        align: center middle;
+    }
+    
+    #btn-upload {
+        margin: 1 2;
     }
     """
 
@@ -80,5 +92,15 @@ class WelcomeScreen(Screen):
             
             yield Static(f"Connected to [b]{cluster_name}[/b] cluster", id="cluster-info")
             
+            # Add button row
+            with Horizontal(id="button-row"):
+                yield Button("📤 UPLOAD", id="btn-upload", variant="success")
+            
         yield Footer()
+    
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        """Handle button presses."""
+        if event.button.id == "btn-upload":
+            self.log("Upload button pressed!")
+            # TODO: Implement upload functionality
 
