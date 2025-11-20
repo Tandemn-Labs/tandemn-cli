@@ -140,8 +140,8 @@ class WelcomeScreen(Screen):
                 self.query_one("#selected-path").update("No files found in storage")
                 return
             
-            # Show file list screen
-            await self.app.push_screen_wait(FileListScreen(files))
+            # Show file list screen with user_id and api
+            await self.app.push_screen_wait(FileListScreen(files, user_id, self.app.api))
         except Exception as e:
             self.query_one("#selected-path").update(f"Error loading files: {e}")
             self.log(f"Error loading files: {e}")
