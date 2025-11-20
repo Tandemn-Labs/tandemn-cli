@@ -140,7 +140,7 @@ class TandemnAPI:
         """
         client = await self._get_client()
         response = await client.post(
-            "http://13.218.233.47:8000/storage/presign/upload",
+            "http://api.tandemn.com/cli/api/storage/presign/upload",
             data={"remote_path": remote_path,"user": user, "expires": expires}
         )
         response.raise_for_status()
@@ -152,7 +152,7 @@ class TandemnAPI:
         """
         client = await self._get_client()
         response = await client.post(
-            "http://13.218.233.47:8000/storage/multipart/start",
+            "http://api.tandemn.com/cli/api/storage/multipart/start",
             data={"remote_path": remote_path, "user": user}
         )
         response.raise_for_status()
@@ -164,7 +164,7 @@ class TandemnAPI:
         """
         client = await self._get_client()
         response = await client.post(
-            "http://13.218.233.47:8000/storage/multipart/sign-part",
+            "http://api.tandemn.com/cli/api/storage/multipart/sign-part",
             data={
                 "upload_id": upload_id,
                 "user": user,
@@ -183,7 +183,7 @@ class TandemnAPI:
         import json
         client = await self._get_client()
         response = await client.post(
-            "http://13.218.233.47:8000/storage/multipart/complete",
+            "http://api.tandemn.com/cli/api/storage/multipart/complete",
             data={
                 "user": user,
                 "remote_path": remote_path,
@@ -200,9 +200,40 @@ class TandemnAPI:
         """
         client = await self._get_client()
         response = await client.get(
-            f"http://13.218.233.47:8000/storage/list/{user}",
+            f"http://api.tandemn.com/cli/api/storage/list/{user}",
             params={"prefix": prefix}
         )
         response.raise_for_status()
         return response.json()
+
+    async def download_file(self, user: str, remote_path: str, local_path: str) -> None:
+        """
+        Download a file from storage.
+        """
+        # Strip s3:// prefix and bucket, extract only the filename
+        if remote_path.startswith("s3://"):
+            # s3://bucket/users/user_xxx/filename.txt -> filename.txt
+            remote_path = remote_path.split("/")[-1]
+            
+        client = await self._get_client()
+        async with client.stream("GET", f"http://api.tandemn.com/cli/api/storage/download/{user}/{remote_path}") as response:
+            response.raise_for_status()
+            with open(local_path, "wb") as f:
+                async for chunk in response.aiter_bytes(chunk_size=8192):
+                    f.write(chunk)
+
+    async def delete_file(self, user: str, remote_path: str) -> dict:
+        """
+        Delete a file from storage.
+        """
+        # Strip s3:// prefix and bucket, extract only the filename
+        if remote_path.startswith("s3://"):
+            # s3://bucket/users/user_xxx/filename.txt -> filename.txt
+            remote_path = remote_path.split("/")[-1]
+            
+        client = await self._get_client()
+        response = await client.delete(f"http://api.tandemn.com/cli/api/storage/delete/{user}/{remote_path}")
+        response.raise_for_status()
+        return response.json()
+
 
