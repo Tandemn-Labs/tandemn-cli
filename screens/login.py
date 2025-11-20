@@ -276,6 +276,8 @@ class LoginScreen(Screen):
             session_token=session.session_token,
             clusters=session.clusters,  # API returns the list of clusters connected
             expires_at=session.expires_at,
+            user_id=self.state.login_result.user_id,
+            email=self.state.login_result.email,
             message=session.message,
             error=session.error
         )

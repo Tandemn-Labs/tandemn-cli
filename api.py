@@ -129,3 +129,68 @@ class TandemnAPI:
             message = data.get("message", None),
             error = data.get("error", None)
         )
+
+    # ============================================================================
+    # STORAGE API
+    # ============================================================================
+
+    async def presign_upload(self, remote_path: str, user: str, expires: int = 600) -> dict:
+        """
+        Get a presigned URL for single-file upload (<500MB).
+        """
+        client = await self._get_client()
+        response = await client.post(
+            "http://13.218.233.47:8000/storage/presign/upload",
+            data={"remote_path": remote_path,"user": user, "expires": expires}
+        )
+        response.raise_for_status()
+        return response.json()
+
+    async def multipart_start(self, remote_path: str, user: str) -> dict:
+        """
+        Start a multipart upload. Returns upload_id.
+        """
+        client = await self._get_client()
+        response = await client.post(
+            "http://13.218.233.47:8000/storage/multipart/start",
+            data={"remote_path": remote_path, "user": user}
+        )
+        response.raise_for_status()
+        return response.json()
+
+    async def multipart_sign_part(self, upload_id: str, user: str, remote_path: str, part_number: int, expires: int = 600) -> dict:
+        """
+        Get a presigned URL for a specific part.
+        """
+        client = await self._get_client()
+        response = await client.post(
+            "http://13.218.233.47:8000/storage/multipart/sign-part",
+            data={
+                "upload_id": upload_id,
+                "user": user,
+                "remote_path": remote_path,
+                "part_number": part_number,
+                "expires": expires
+            }
+        )
+        response.raise_for_status()
+        return response.json()
+
+    async def multipart_complete(self, user: str, remote_path: str, upload_id: str, parts: List[dict]) -> dict:
+        """
+        Complete a multipart upload.
+        """
+        import json
+        client = await self._get_client()
+        response = await client.post(
+            "http://13.218.233.47:8000/storage/multipart/complete",
+            data={
+                "user": user,
+                "remote_path": remote_path,
+                "upload_id": upload_id,
+                "parts": json.dumps(parts)
+            }
+        )
+        response.raise_for_status()
+        return response.json()
+
