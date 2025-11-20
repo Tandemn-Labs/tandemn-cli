@@ -26,7 +26,7 @@ class WelcomeScreen(Screen):
        @@@@@      @@@      @@@@      @@@@    @@@@      @@@@   @@@@     @@@@@   @@@@     @@@@   @@@@     @@@@@     @@@  @@@@@     @@@@                 
          @@@@@    @@@      @@@        @@@    @@@       @@@@  @@@        @@@@  @@@@@@@@@@@@@@@  @@@      @@@@      @@@  @@@       @@@@                 
        @@@@@      @@@     @@@         @@@    @@@       @@@@  @@@        @@@@  @@@@@@@@@@@@@@@  @@@       @@       @@@  @@@       @@@@                 
-   @@@@@@         @@@      @@@@      @@@@    @@@       @@@@  @@@@      @@@@@   @@@@     @@@@   @@@       @@       @@@  @@@       @@@@                 
+   @@@@@@         @@@      @@@@      @@@@    @@@       @@@@  @@@@      @@@@@   @@@@            @@@       @@       @@@  @@@       @@@@                 
 @@@@@@             @@@@@@@  @@@@@@@@@@@@@    @@@       @@@@   @@@@@@@@@@@@@@   @@@@@@@@@@@@    @@@       @@       @@@  @@@       @@@@ ****************
  @@                 @@@@@@    @@@@@@@ @@@    @@@       @@@@     @@@@@@@  @@@      @@@@@@@      @@@       @@       @@@  @@@       @@@@  ************** 
     """
@@ -113,17 +113,41 @@ class WelcomeScreen(Screen):
             
         yield Footer()
     
+    async def update_upload_status(self, message: str, remaining: int):
+        """Callback for upload progress updates."""
+        if remaining > 0:
+            self.query_one("#selected-path").update(f"{message} | {remaining} files remaining")
+        else:
+            self.query_one("#selected-path").update(f"{message} | All uploads complete! ✨")
+    
     @on(Button.Pressed, "#btn-upload")
     @work
     async def handle_upload(self) -> None:
         """Open file browser and show selected path."""
         # Push the file browser screen and wait for result
-        file_path = await self.app.push_screen_wait(FileBrowserScreen())
+        files = await self.app.push_screen_wait(FileBrowserScreen())
         
-        if file_path:
-            # Update the display with the selected file
-            self.query_one("#selected-path").update(f"📄 Selected: {file_path}")
-            self.log(f"File selected for upload: {file_path}")
+        if files:
+            count = len(files)
+            self.query_one("#selected-path").update(f"🚀 Uploading {count} files...")
+            
+            # Start upload
+            from upload_manager import UploadManager
+            # Ensure API is set on singleton or passed. self.app.api is available on TandemnCLIApp
+            manager = UploadManager(self.app.api) 
+            manager.set_callback(self.update_upload_status)  # Set progress callback
+            
+            # Use user_id from session
+            user_id = self.session.user_id
+            if not user_id:
+                self.query_one("#selected-path").update("Error: User ID missing from session")
+                self.log("Error: User ID missing from session")
+                return
+                
+            await manager.add_files(files, user_id)
+            
+            self.query_one("#selected-path").update(f"✅ Uploading {count} files in background")
+            self.log(f"Started upload for {count} files")
         else:
             # User cancelled
             self.query_one("#selected-path").update("No file selected")
