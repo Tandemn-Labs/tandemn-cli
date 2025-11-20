@@ -53,6 +53,9 @@ class Session:
     session_token: Optional[str] = None
     clusters: Optional[List[Cluster]] = None
     expires_at: Optional[str] = None
+    user_id: Optional[str] = None
+    email: Optional[str] = None
+    
     # these two are present in the response when the user/API key is not found
     message: Optional[str] = None
     error: Optional[str] = None
