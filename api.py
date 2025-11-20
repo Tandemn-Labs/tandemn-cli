@@ -194,3 +194,15 @@ class TandemnAPI:
         response.raise_for_status()
         return response.json()
 
+    async def list_files(self, user: str, prefix: str = "") -> dict:
+        """
+        List all files for a user.
+        """
+        client = await self._get_client()
+        response = await client.get(
+            f"http://13.218.233.47:8000/storage/list/{user}",
+            params={"prefix": prefix}
+        )
+        response.raise_for_status()
+        return response.json()
+

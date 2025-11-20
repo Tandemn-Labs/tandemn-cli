@@ -8,6 +8,7 @@ from textual.widgets import Button, Footer, Static
 
 from models.login import Session
 from screens.file_browser import FileBrowserScreen
+from screens.file_list import FileListScreen
 
 
 class WelcomeScreen(Screen):
@@ -72,8 +73,8 @@ class WelcomeScreen(Screen):
         align: center middle;
     }
     
-    #btn-upload {
-        margin: 1 2;
+    Button {
+        margin: 0 1;
     }
     
     #selected-path {
@@ -107,6 +108,7 @@ class WelcomeScreen(Screen):
             # Add button row
             with Horizontal(id="button-row"):
                 yield Button("📤 UPLOAD", id="btn-upload", variant="success")
+                yield Button("📁 FILES", id="btn-files", variant="primary")
             
             # Selected file path display
             yield Static("No file selected", id="selected-path")
@@ -120,6 +122,30 @@ class WelcomeScreen(Screen):
         else:
             self.query_one("#selected-path").update(f"{message} | All uploads complete! ✨")
     
+    @on(Button.Pressed, "#btn-files")
+    @work
+    async def handle_files(self) -> None:
+        """Open file list screen."""
+        user_id = self.session.user_id
+        if not user_id:
+            self.query_one("#selected-path").update("Error: User ID missing")
+            return
+        
+        try:
+            # Fetch files from storage
+            result = await self.app.api.list_files(user_id)
+            files = result.get("files", [])
+            
+            if not files:
+                self.query_one("#selected-path").update("No files found in storage")
+                return
+            
+            # Show file list screen
+            await self.app.push_screen_wait(FileListScreen(files))
+        except Exception as e:
+            self.query_one("#selected-path").update(f"Error loading files: {e}")
+            self.log(f"Error loading files: {e}")
+    
     @on(Button.Pressed, "#btn-upload")
     @work
     async def handle_upload(self) -> None:
@@ -132,7 +158,7 @@ class WelcomeScreen(Screen):
             self.query_one("#selected-path").update(f"🚀 Uploading {count} files...")
             
             # Start upload
-            from upload_manager import UploadManager
+            from utils.storage_manager import UploadManager
             # Ensure API is set on singleton or passed. self.app.api is available on TandemnCLIApp
             manager = UploadManager(self.app.api) 
             manager.set_callback(self.update_upload_status)  # Set progress callback
