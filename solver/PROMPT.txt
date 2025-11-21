@@ -1,0 +1,34 @@
+In the above prompt, please provide me structured outputs on a CFG File. Based on what the user has provided, we should be able to fill the config file faithfully.
+In the comments of the config file, we have specified what is the TYPE of the response and what are the options that can be used.
+Do not give suggestions for what do you think needs to be done, just purely act as an information extractor. 
+
+Here is the config file-
+
+meta:
+  description: # [type:str] A short description in 20 characters of the job
+
+task:              
+  type:    # [type:str] Options: batched_inference | online_serving | embeddings | image_generation
+  priority: normal # [type:str] low | normal | high | urgent (anything online is urgent. rest classify based on hours. 48hr is low, 24-8 hr is normal, anything less than 8 is high)
+
+model:            
+  engine: ____ # [type:str] options: vllm (batched_inference, online_inference and embeddings) | sglang (batched_inference, online_inference and embeddings) | diffusers (for image generation) | xDIT (for image generation) | not_specified (if inference engine not specified in the text)
+  tokenizer: ____ # [type:str] Options: huggingface | mistral | not_specified
+  max_context: ____ # [type:int] This refers to the context window. Put not_specified if not told. 
+  max_model_len: ____ # [type:int] Put not_specified if not told. This is context window + output generation length 
+  dtype: ____ # [type:str] One of fp32 | bf16 | fp16 | fp8 | fp4 | int8 | int4 | not_specified
+  quantization:
+    method: ____ # [type:str] none | int8 | gptq | awq | gguf | a8w8 | w4a8 | not_specified if not told
+    bits: ____ # [type:str] if applicable, else put not_specified
+  features:
+    speculative_decode: # [type:str] one of true | false | not_specified 
+    continuous_batching: # [type:str] true | false | not_specified
+    PD_disaggregation: # [type:str] true | false | not_specified
+
+slo: 
+  mode ____ # [type:str] One of offline | online. It is ALWAYS online for image_generation
+  offline: 
+    deadline_hours: ____ # [type:int] required for batched_inference
+
+placement: 
+  sku_preferences: ____ # [type:str] The GPU type, the user wants to run on like "H100", "A100", "L40S". If not mentioned -> not_specified
