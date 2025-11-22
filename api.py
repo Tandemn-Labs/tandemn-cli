@@ -1,4 +1,5 @@
 from models.login import Cluster, LoginResponse, Session
+from models.solver import SolverResponse
 import httpx
 from typing import Optional, List
 
@@ -235,5 +236,60 @@ class TandemnAPI:
         response = await client.delete(f"http://api.tandemn.com/cli/api/storage/delete/{user}/{remote_path}")
         response.raise_for_status()
         return response.json()
+
+    # ============================================================================
+    # SOLVER API
+    # ============================================================================
+
+    async def submit_solver_prompt(self, prompt: str, user_id: str) -> dict:
+        """
+        Submit a natural language prompt to the solver API.
+        The solver will process the prompt using GPT and return a structured config.
+        
+        Args:
+            prompt: Natural language description of the job requirements (max 500 chars)
+            user_id: The user ID from the session
+            
+        Returns:
+            dict: Structured job configuration from the solver
+            
+        Example response:
+        {
+            "success": true,
+            "config": {
+                "meta": {"description": "..."},
+                "task": {"type": "batched_inference", "priority": "normal"},
+                "model": {...},
+                "slo": {...},
+                "placement": {...}
+            }
+        }
+        """
+        client = await self._get_client()
+        
+        # TODO: Replace with actual solver endpoint URL when ready
+        solver_endpoint = "http://0.0.0.0:8000/extract"
+        
+        response = await client.post(
+            solver_endpoint,
+            json={
+                "prompt": prompt,
+                "user_id": user_id
+            }
+        )
+        response.raise_for_status()
+        data = response.json()
+        
+        # Validate response structure
+        try:
+            validated = SolverResponse(**data)
+            return validated.model_dump()
+        except Exception as e:
+            # If validation fails, return error response
+            return {
+                "success": False,
+                "error": f"Invalid response format: {str(e)}",
+                "config": None
+            }
 
 
