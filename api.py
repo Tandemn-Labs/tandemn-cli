@@ -26,7 +26,7 @@ class TandemnAPI:
         to make the API Calls to the Tandemn API (serverless API)
         """
         if self._client is None:
-            self._client = httpx.AsyncClient(base_url=self.base_url, timeout=20.0)
+            self._client = httpx.AsyncClient(base_url=self.base_url, timeout=60.0)
         return self._client
 
     async def aclose(self) -> None:
@@ -201,7 +201,7 @@ class TandemnAPI:
         """
         client = await self._get_client()
         response = await client.get(
-            f"http://api.tandemn.com/cli/api/storage/list/{user}",
+            f"http://3.91.156.120:8000/storage/list/{user}",
             params={"prefix": prefix}
         )
         response.raise_for_status()
