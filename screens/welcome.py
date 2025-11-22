@@ -188,38 +188,41 @@ class WelcomeScreen(Screen):
     async def handle_submit_prompt(self) -> None:
         """Open prompt modal for solver submission."""
         # Push the prompt modal and wait for result
-        prompt_text = await self.app.push_screen_wait(PromptModal())
+        result = await self.app.push_screen_wait(PromptModal())
         
-        if prompt_text:
-            self.query_one("#selected-path").update(f"📝 Processing prompt: {prompt_text[:50]}...")
-            self.log(f"Received prompt: {prompt_text}")
+        if result:
+            # Modal already called API and returned result
+            config = result.get("config", {})
+            description = config.get('meta', {}).get('description', 'N/A')
+            task_type = config.get("task", {}).get("type", "")
+            selected_file = result.get("selected_file")
             
-            # Get user_id from session
-            user_id = self.session.user_id
-            if not user_id:
-                self.query_one("#selected-path").update("Error: User ID missing from session")
-                self.notify("User ID is required", severity="error")
-                return
+            # Build status message
+            status_msg = f"✅ Config ready: {description}"
+            if selected_file:
+                filename = selected_file.split('/')[-1]
+                status_msg += f" | File: {filename}"
             
-            # Call the solver API
-            # NOTE: Implement this endpoint on the server side before using
-            result = await self.app.api.submit_solver_prompt(prompt_text, user_id)
+            self.query_one("#selected-path").update(status_msg)
+            self.notify("Prompt processed successfully!", severity="information")
             
-            # Display result
-            if result.get("success"):
-                config = result.get("config", {})
-                self.query_one("#selected-path").update(
-                    f"✅ Solver returned config: {config.get('meta', {}).get('description', 'N/A')}"
-                )
-                self.notify("Prompt processed successfully!", severity="information")
-                self.log(f"Solver result: {json.dumps(result, indent=4)}")
-            else:
-                error_msg = result.get("error", "Unknown error")
-                self.query_one("#selected-path").update(f"❌ Solver error: {error_msg}")
-                self.notify(f"Solver error: {error_msg}", severity="error")
-                
+            # Log full result
+            log_data = {
+                "config": config,
+                "selected_file": selected_file
+            }
+            self.log(f"Solver result: {json.dumps(log_data, indent=4)}")
+            
+            # Print the selected file if present
+            if selected_file:
+                print(f"\n{'='*60}")
+                print(f"SELECTED FILE FOR BATCHED INFERENCE:")
+                print(f"  Task Type: {task_type}")
+                print(f"  File Path: {selected_file}")
+                print(f"  Filename: {selected_file.split('/')[-1]}")
+                print(f"{'='*60}\n")
         else:
-            # User cancelled
+            # User cancelled or error occurred
             self.query_one("#selected-path").update("Prompt submission cancelled")
             self.log("Prompt submission cancelled")
 
