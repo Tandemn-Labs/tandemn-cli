@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+import json 
 from textual import on, work
 from textual.app import ComposeResult
 from textual.containers import Container, Horizontal, VerticalScroll
@@ -9,6 +11,7 @@ from textual.widgets import Button, Footer, Static
 from models.login import Session
 from screens.file_browser import FileBrowserScreen
 from screens.file_list import FileListScreen
+from screens.prompt_modal import PromptModal
 
 
 class WelcomeScreen(Screen):
@@ -109,6 +112,7 @@ class WelcomeScreen(Screen):
             with Horizontal(id="button-row"):
                 yield Button("📤 UPLOAD", id="btn-upload", variant="success")
                 yield Button("📁 FILES", id="btn-files", variant="primary")
+                yield Button("✨ SUBMIT", id="btn-submit", variant="warning")
             
             # Selected file path display
             yield Static("No file selected", id="selected-path")
@@ -178,4 +182,44 @@ class WelcomeScreen(Screen):
             # User cancelled
             self.query_one("#selected-path").update("No file selected")
             self.log("File selection cancelled")
+    
+    @on(Button.Pressed, "#btn-submit")
+    @work
+    async def handle_submit_prompt(self) -> None:
+        """Open prompt modal for solver submission."""
+        # Push the prompt modal and wait for result
+        prompt_text = await self.app.push_screen_wait(PromptModal())
+        
+        if prompt_text:
+            self.query_one("#selected-path").update(f"📝 Processing prompt: {prompt_text[:50]}...")
+            self.log(f"Received prompt: {prompt_text}")
+            
+            # Get user_id from session
+            user_id = self.session.user_id
+            if not user_id:
+                self.query_one("#selected-path").update("Error: User ID missing from session")
+                self.notify("User ID is required", severity="error")
+                return
+            
+            # Call the solver API
+            # NOTE: Implement this endpoint on the server side before using
+            result = await self.app.api.submit_solver_prompt(prompt_text, user_id)
+            
+            # Display result
+            if result.get("success"):
+                config = result.get("config", {})
+                self.query_one("#selected-path").update(
+                    f"✅ Solver returned config: {config.get('meta', {}).get('description', 'N/A')}"
+                )
+                self.notify("Prompt processed successfully!", severity="information")
+                self.log(f"Solver result: {json.dumps(result, indent=4)}")
+            else:
+                error_msg = result.get("error", "Unknown error")
+                self.query_one("#selected-path").update(f"❌ Solver error: {error_msg}")
+                self.notify(f"Solver error: {error_msg}", severity="error")
+                
+        else:
+            # User cancelled
+            self.query_one("#selected-path").update("Prompt submission cancelled")
+            self.log("Prompt submission cancelled")
 
