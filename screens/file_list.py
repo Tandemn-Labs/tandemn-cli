@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Optional
 
 from textual import on, work
 from textual.app import ComposeResult
@@ -9,9 +10,10 @@ from textual.screen import ModalScreen
 from textual.widgets import Button, Label, ListItem, ListView, Static
 
 
-class FileListScreen(ModalScreen[None]):
+class FileListScreen(ModalScreen[Optional[str]]):
     """
     A modal screen for viewing all user files in storage.
+    Can return selected file path when in selection mode.
     """
 
     BINDINGS = [
@@ -73,12 +75,13 @@ class FileListScreen(ModalScreen[None]):
     }
     """
 
-    def __init__(self, files: list, user_id: str, api, **kwargs) -> None:
+    def __init__(self, files: list, user_id: str, api, selection_mode: bool = False, **kwargs) -> None:
         super().__init__(**kwargs)
         self.files = files
         self.user_id = user_id
         self.api = api
         self.selected_file = None
+        self.selection_mode = selection_mode  # If True, shows Select button instead of Download/Delete
 
     def compose(self) -> ComposeResult:
         """Create the file list layout."""
@@ -99,8 +102,11 @@ class FileListScreen(ModalScreen[None]):
             yield Static("Select a file to enable actions", id="selected-file")
             
             with Horizontal(id="button-row"):
-                yield Button("📥 Download", id="btn-download", variant="success", disabled=True)
-                yield Button("🗑️ Delete", id="btn-delete", variant="error", disabled=True)
+                if self.selection_mode:
+                    yield Button("Select File", id="btn-select", variant="success", disabled=True)
+                else:
+                    yield Button("📥 Download", id="btn-download", variant="success", disabled=True)
+                    yield Button("🗑️ Delete", id="btn-delete", variant="error", disabled=True)
                 yield Button("Close", id="btn-close", variant="default")
 
     @on(ListView.Selected)
@@ -111,9 +117,21 @@ class FileListScreen(ModalScreen[None]):
             self.selected_file = item.file_path
             filename = item.file_path.split("/")[-1]
             self.query_one("#selected-file").update(f"Selected: {filename}")
-            self.query_one("#btn-download", Button).disabled = False
-            self.query_one("#btn-delete", Button).disabled = False
+            
+            if self.selection_mode:
+                # Enable Select button in selection mode
+                self.query_one("#btn-select", Button).disabled = False
+            else:
+                # Enable Download/Delete buttons in normal mode
+                self.query_one("#btn-download", Button).disabled = False
+                self.query_one("#btn-delete", Button).disabled = False
 
+    @on(Button.Pressed, "#btn-select")
+    def handle_select(self) -> None:
+        """Return selected file in selection mode."""
+        if self.selected_file:
+            self.dismiss(self.selected_file)
+    
     @on(Button.Pressed, "#btn-download")
     @work
     async def handle_download(self) -> None:
