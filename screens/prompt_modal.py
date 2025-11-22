@@ -1,14 +1,16 @@
 from __future__ import annotations
 
-from textual import on
+from typing import Optional
+
+from textual import on, work
 from textual.app import ComposeResult
 from textual.containers import Container, Horizontal, Vertical
 from textual.screen import ModalScreen
-from textual.widgets import Button, Label, TextArea, Static
+from textual.widgets import Button, Label, TextArea, Static, LoadingIndicator
 from textual.reactive import reactive
 
 
-class PromptModal(ModalScreen):
+class PromptModal(ModalScreen[Optional[dict]]):
     """
     Modal screen for submitting prompts to the solver API.
     
@@ -73,6 +75,24 @@ class PromptModal(ModalScreen):
         color: #ef4444;
     }
 
+    #loading-container {
+        width: 100%;
+        height: auto;
+        align: center middle;
+        padding: 1;
+        display: none;
+    }
+
+    #loading-container.visible {
+        display: block;
+    }
+
+    #loading-status {
+        color: #60a5fa;
+        text-align: center;
+        margin-top: 1;
+    }
+
     #button-container {
         width: 100%;
         height: auto;
@@ -106,6 +126,9 @@ class PromptModal(ModalScreen):
                 show_line_numbers=False,
             )
             yield Label(f"0 / {self.MAX_CHARS} characters", id="char-counter")
+            with Container(id="loading-container"):
+                yield LoadingIndicator()
+                yield Label("Processing prompt...", id="loading-status")
             with Horizontal(id="button-container"):
                 yield Button("Submit", id="btn-submit", variant="success")
                 yield Button("Cancel", id="btn-cancel", variant="default")
@@ -131,27 +154,106 @@ class PromptModal(ModalScreen):
             counter_label.add_class("warning")
 
     @on(Button.Pressed, "#btn-submit")
-    def handle_submit(self) -> None:
-        """Handle submit button press."""
+    @work
+    async def handle_submit(self) -> None:
+        """Handle submit button press and call API."""
         textarea = self.query_one("#prompt-textarea", TextArea)
         text = textarea.text.strip()
         
         # Validate input
         if not text:
-            # Show error feedback
             self.notify("Please enter a prompt", severity="warning")
             return
         
         if len(text) > self.MAX_CHARS:
-            # Show error feedback
             self.notify(
                 f"Prompt exceeds {self.MAX_CHARS} character limit",
                 severity="error"
             )
             return
         
-        # Return the prompt text and dismiss modal
-        self.dismiss(text)
+        # Show loading indicator
+        loading = self.query_one("#loading-container")
+        loading.add_class("visible")
+        
+        # Disable buttons during API call
+        submit_btn = self.query_one("#btn-submit", Button)
+        cancel_btn = self.query_one("#btn-cancel", Button)
+        submit_btn.disabled = True
+        cancel_btn.disabled = True
+        
+        try:
+            # Get session info from app
+            session = self.app.session if hasattr(self.app, 'session') else None
+            if not session or not session.user_id:
+                self.notify("User ID missing from session", severity="error")
+                return
+            
+            # Call the solver API
+            result = await self.app.api.submit_solver_prompt(text, session.user_id)
+            
+            # Check result and dismiss with data
+            if result.get("success"):
+                # Check if it's batched_inference
+                config = result.get("config", {})
+                task_type = config.get("task", {}).get("type", "")
+                
+                if task_type == "batched_inference":
+                    # Hide loading, keep modal open for file selection
+                    loading.remove_class("visible")
+                    submit_btn.disabled = False
+                    cancel_btn.disabled = False
+                    
+                    self.notify("Detected Batched Inference - please select a file to proceed", severity="information")
+                    
+                    # Fetch user files and show file selector
+                    try:
+                        files_result = await self.app.api.list_files(session.user_id)
+                        files = files_result.get("files", [])
+                        
+                        if not files:
+                            self.notify("No files found in storage. Please upload a file first.", severity="warning")
+                            self.dismiss(None)
+                            return
+                        
+                        # Import here to avoid circular dependency
+                        from screens.file_list import FileListScreen
+                        
+                        # Open file selector in selection mode
+                        selected_file = await self.app.push_screen_wait(
+                            FileListScreen(files, session.user_id, self.app.api, selection_mode=True)
+                        )
+                        
+                        if selected_file:
+                            # Add selected file to result
+                            result["selected_file"] = selected_file
+                            self.notify(f"File selected: {selected_file.split('/')[-1]}", severity="information")
+                            self.dismiss(result)
+                        else:
+                            self.notify("No file selected, cancelling", severity="warning")
+                            self.dismiss(None)
+                    except Exception as e:
+                        error_str = str(e).replace("[", "\\[").replace("{", "\\{").replace("}", "\\}")
+                        self.notify(f"Error loading files: {error_str}", severity="error")
+                        self.dismiss(None)
+                else:
+                    # Not batched_inference, return immediately
+                    self.dismiss(result)
+            else:
+                error_msg = result.get("error", "Unknown error")
+                # Escape markup characters
+                escaped = error_msg.replace("[", "\\[").replace("{", "\\{").replace("}", "\\}")
+                self.notify(f"Error: {escaped}", severity="error")
+                self.dismiss(None)
+        except Exception as e:
+            error_str = str(e).replace("[", "\\[").replace("{", "\\{").replace("}", "\\}")
+            self.notify(f"Error: {error_str}", severity="error")
+            self.dismiss(None)
+        finally:
+            # Hide loading and re-enable buttons
+            loading.remove_class("visible")
+            submit_btn.disabled = False
+            cancel_btn.disabled = False
 
     @on(Button.Pressed, "#btn-cancel")
     def handle_cancel(self) -> None:
