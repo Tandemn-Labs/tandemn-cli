@@ -99,7 +99,7 @@ class WelcomeScreen(Screen):
         """Create the welcome screen layout."""
         with VerticalScroll(id="welcome-container"):
             yield Static(self.LOGO, id="logo")
-            yield Static("✓ Authenticated - Welcome to Tandemn!", id="welcome-text")
+            # yield Static("Welcome to Tandemn!", id="welcome-text")
             
             # Get cluster name from session
             cluster_name = "Tandemn"
@@ -124,7 +124,12 @@ class WelcomeScreen(Screen):
         if remaining > 0:
             self.query_one("#selected-path").update(f"{message} | {remaining} files remaining")
         else:
-            self.query_one("#selected-path").update(f"{message} | All uploads complete! ✨")
+            # Check if any files were skipped during validation
+            skipped = getattr(self, '_skipped_count', 0)
+            if skipped > 0:
+                self.query_one("#selected-path").update(f"All uploads complete! ⚠️ {skipped} file(s) skipped")
+            else:
+                self.query_one("#selected-path").update(f"All uploads complete!")
     
     @on(Button.Pressed, "#btn-files")
     @work
@@ -159,13 +164,12 @@ class WelcomeScreen(Screen):
         
         if files:
             count = len(files)
-            self.query_one("#selected-path").update(f"🚀 Uploading {count} files...")
+            self.query_one("#selected-path").update(f"🔍 Validating {count} files...")
             
             # Start upload
             from utils.storage_manager import UploadManager
-            # Ensure API is set on singleton or passed. self.app.api is available on TandemnCLIApp
             manager = UploadManager(self.app.api) 
-            manager.set_callback(self.update_upload_status)  # Set progress callback
+            manager.set_callback(self.update_upload_status)
             
             # Use user_id from session
             user_id = self.session.user_id
@@ -173,11 +177,33 @@ class WelcomeScreen(Screen):
                 self.query_one("#selected-path").update("Error: User ID missing from session")
                 self.log("Error: User ID missing from session")
                 return
-                
-            await manager.add_files(files, user_id)
             
-            self.query_one("#selected-path").update(f"✅ Uploading {count} files in background")
-            self.log(f"Started upload for {count} files")
+            # Add files and get validation result
+            result = await manager.add_files(files, user_id)
+            
+            queued = result["queued"]
+            skipped = result["skipped"]
+            self._skipped_count = len(skipped)  # Store for callback
+            
+            # Show appropriate message based on result
+            if skipped and not queued:
+                # All files failed validation
+                errors = "; ".join([f"{name}: {reason}" for name, reason in skipped])
+                self.query_one("#selected-path").update(f"❌ Not uploading - invalid JSONL: {errors}")
+                self.notify(f"Validation failed for {len(skipped)} file(s)", severity="error")
+            elif skipped:
+                # Some files skipped, some queued
+                self.query_one("#selected-path").update(
+                    f"⚠️ Uploading {len(queued)} files | Skipped {len(skipped)} invalid files"
+                )
+                self.notify(f"Some files skipped, some queued", severity="warning")
+                for name, reason in skipped:
+                    self.log(f"Skipped {name}: {reason}")
+            else:
+                # All files queued successfully
+                self.query_one("#selected-path").update(f"✅ Uploading {len(queued)} files in background")
+            
+            self.log(f"Upload result: {len(queued)} queued, {len(skipped)} skipped")
         else:
             # User cancelled
             self.query_one("#selected-path").update("No file selected")
