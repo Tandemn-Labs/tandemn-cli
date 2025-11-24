@@ -141,7 +141,7 @@ class TandemnAPI:
         """
         client = await self._get_client()
         response = await client.post(
-            "http://api.tandemn.com/cli/api/storage/presign/upload",
+            f"{self.base_url}/storage/presign/upload",
             data={"remote_path": remote_path,"user": user, "expires": expires}
         )
         response.raise_for_status()
@@ -153,7 +153,7 @@ class TandemnAPI:
         """
         client = await self._get_client()
         response = await client.post(
-            "http://api.tandemn.com/cli/api/storage/multipart/start",
+            f"{self.base_url}/storage/multipart/start",
             data={"remote_path": remote_path, "user": user}
         )
         response.raise_for_status()
@@ -165,7 +165,7 @@ class TandemnAPI:
         """
         client = await self._get_client()
         response = await client.post(
-            "http://api.tandemn.com/cli/api/storage/multipart/sign-part",
+            f"{self.base_url}/storage/multipart/sign-part",
             data={
                 "upload_id": upload_id,
                 "user": user,
@@ -184,7 +184,7 @@ class TandemnAPI:
         import json
         client = await self._get_client()
         response = await client.post(
-            "http://api.tandemn.com/cli/api/storage/multipart/complete",
+            f"{self.base_url}/storage/multipart/complete",
             data={
                 "user": user,
                 "remote_path": remote_path,
@@ -201,7 +201,7 @@ class TandemnAPI:
         """
         client = await self._get_client()
         response = await client.get(
-            f"http://3.91.156.120:8000/storage/list/{user}",
+            f"{self.base_url}/storage/list/{user}",
             params={"prefix": prefix}
         )
         response.raise_for_status()
@@ -217,7 +217,7 @@ class TandemnAPI:
             remote_path = remote_path.split("/")[-1]
             
         client = await self._get_client()
-        async with client.stream("GET", f"http://api.tandemn.com/cli/api/storage/download/{user}/{remote_path}") as response:
+        async with client.stream("GET", f"{self.base_url}/storage/download/{user}/{remote_path}") as response:
             response.raise_for_status()
             with open(local_path, "wb") as f:
                 async for chunk in response.aiter_bytes(chunk_size=8192):
@@ -233,7 +233,7 @@ class TandemnAPI:
             remote_path = remote_path.split("/")[-1]
             
         client = await self._get_client()
-        response = await client.delete(f"http://api.tandemn.com/cli/api/storage/delete/{user}/{remote_path}")
+        response = await client.delete(f"{self.base_url}/storage/delete/{user}/{remote_path}")
         response.raise_for_status()
         return response.json()
 
