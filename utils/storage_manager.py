@@ -80,19 +80,75 @@ class UploadManager:
             print(f"DEBUG: Found existing state file at {self.STATE_FILE}")
 
     async def add_files(self, files: List[Path], user_id: str, remote_prefix: str = ""):
+        """
+        Add files to upload queue. Returns a result dict with validation info.
+        
+        Returns:
+            dict: {
+                "queued": [list of files added to queue],
+                "skipped": [list of (filename, error_reason) tuples],
+            }
+        """
         print(f"DEBUG: Adding {len(files)} files to upload queue for user {user_id}")
+        
+        result = {"queued": [], "skipped": []}
+        
         for f in files:
-            # Simple remote path: just the filename for now
+            # Check if JSONL - needs validation
+            if f.suffix == ".jsonl":
+                validation_error = self._validate_jsonl(f)
+                if validation_error:
+                    print(f"❌ VALIDATION FAILED for {f.name}: {validation_error}")
+                    result["skipped"].append((f.name, validation_error))
+                    continue
+                print(f"✅ VALIDATION PASSED for {f.name}")
+            
+            # Build remote path
             remote_path = f.name
             if remote_prefix:
                 remote_path = f"{remote_prefix}/{f.name}"
                 
             task = UploadTask(f, user_id, remote_path)
             self.queue.append(task)
+            result["queued"].append(f.name)
             
         self._save_state()
-        if not self.running:
+        if not self.running and self.queue:
             asyncio.create_task(self.process_queue())
+        
+        return result
+    
+    def _validate_jsonl(self, file_path: Path) -> Optional[str]:
+        """
+        Validate a JSONL file. Returns None if valid, or error message if invalid.
+        Streams the file line-by-line to handle large files.
+        """
+        try:
+            validator = JSONLValidator(file_path)
+            with open(file_path, 'r', encoding='utf-8') as f:
+                first_line = f.readline().strip()
+                if not first_line:
+                    return "File is empty"
+                # Detect model from first line
+                try:
+                    validator.detect_model(first_line)
+                except Exception as e:
+                    return f"Invalid first line: {e}"
+                # Validate first line
+                if not validator.validate_batch_format(first_line):
+                    return "First line is not valid OpenAI batch format"
+                # Validate remaining lines (streaming, not loading all into memory)
+                line_num = 1
+                for line in f:
+                    line_num += 1
+                    line = line.strip()
+                    if not line:  # Skip empty lines
+                        continue
+                    if not validator.validate_batch_format(line):
+                        return f"Invalid format at line {line_num}"
+            return None  # Valid!
+        except Exception as e:
+            return str(e)
 
     async def process_queue(self):
         if self.running:
@@ -210,3 +266,49 @@ class UploadManager:
         print(f"DEBUG: Completing multipart upload for {task.remote_path}")
         await self.api.multipart_complete(task.user_id, task.remote_path, upload_id, parts)
 
+
+
+class JSONLValidator:
+    """
+    It validates the JSONL file by checking it by lazyloading
+    and verifying if it follows the same pattern as the OpenAI Batched Format
+    """
+
+    def __init__(self, file_path: Path):
+        self.file_path = file_path
+        self.line_count = 0
+        self.model_detected:str = None
+    
+    def validate_batch_format(self, line: str):
+        """
+        Validate if the line complies with the OpenAI Batched Format
+        {"custom_id": "request-1", "method": "POST", "url": "/v1/chat/completions", "body": {"model": "meta-llama/Meta-Llama-3-8B-Instruct", "messages": [{"role": "system", "content": "You are a helpful assistant."},{"role": "user", "content": "Hello world!"}],"max_completion_tokens": 1000}}
+        """
+        try :
+            data = json.loads(line)
+            # check if the keys are custom_id and method and url and body
+            if "custom_id" not in data or "method" not in data or "url" not in data or "body" not in data:
+                return False
+            # check if model is specified in the body 
+            if "model" not in data["body"]:
+                return False
+            # check if the model is valid and matches the model detected
+            if data["body"]["model"] != self.model_detected:
+                return False
+            # check if messages are specified in the body
+            if "messages" not in data["body"]:
+                return False
+        except json.JSONDecodeError:
+            return False
+        return True
+    
+    def detect_model(self, line: str):
+        """
+        Detect the model from the line
+        """
+        data = json.loads(line)
+        if "model" not in data["body"]:
+            return None
+        self.model_detected = data["body"]["model"]
+        return self.model_detected
+    
