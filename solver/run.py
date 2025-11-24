@@ -1,10 +1,10 @@
 from typing import List, Literal, Union, Optional
 from pydantic import BaseModel
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import JSONResponse
+from fastapi.middleware.cors import CORSMiddleware
 from openai import OpenAI
-import json
-
-
-client = OpenAI()
+import uvicorn
 
 # =========================
 # Pydantic Schemas
@@ -152,35 +152,27 @@ when the case is batched_inference.
 Do not add extra keys or text.
 """
 
-
 # =========================
-# Example Usage
+# FastAPI Server
 # =========================
 
-if __name__ == "__main__":
-    # Example user_input prompts to test SYSTEM_PROMPT
-    test_prompts = [
-        """I want to run Batched Inference on my file my_file.jsonl
-        and I want to make sure that it can return me the results in 10 hours
-        and also I want to specify that the quantization needs to be AWQ 
-        for this particular model that too int8 and not lower than that. 
-        Oh and please not use vLLM, use just SGLang.""",
-        # Placeholder 2: Online serving
-        """Please set up an online service for embeddings endpoint, using Qwen/Qwen3-Embedding-8B, use the model name
-        I need p99 latency and can run on any GPU. Use bf16 if possible.""",
-        # Placeholder 3: Image generation
-        """Set up image generation using diffusers, for the wavespeed-ai/flux-kontext-dev model on a single H100.
-        Make sure the model is of full precision and not quantized. Please use the framework as diffusers.""",
-        # Placeholder 4: Missing fields
-        """Bhai mere pas ek jsonl file hai, wo mere local disk pe padi hai, usme kuch promopts hai chalane hai 
-        result mujhe 2 ghante me chahiye, Need to give it to the boss.""",
-        # Placeholder 5: Specific tokenizer and deadline
-        """I have some prompts kept in a files and I need to run them for a model distillation task. It must use mistral tokenizer,
-         has to complete in less than 5 hours, and I'm ok with quantization method being awq and bits to be 8."""]
-    
+app = FastAPI(
+    title="Tandemn Solver Prompt Test API",
+)
 
-    for idx, user_input in enumerate(test_prompts):
-        print(f"\n=== Test Prompt {idx+1} ===")
+client = OpenAI()
+
+class PromptRequest(BaseModel):
+    prompt: str
+
+class PromptResponse(BaseModel):
+    config: dict
+
+@app.post("/extract", response_model=PromptResponse)
+async def extract_job_config(payload: PromptRequest):
+    user_input = payload.prompt
+
+    try:
         response = client.responses.parse(
             model="gpt-5-nano",
             input=[
@@ -189,11 +181,13 @@ if __name__ == "__main__":
             ],
             text_format=JobConfig,
         )
-
         config: JobConfig = response.output_parsed
-        print("\033[1;34m" + "User Input:" + "\033[0m")
-        print(f"{user_input.strip()}\n")
-        
-        print("\033[1;32m" + "Generated Config:" + "\033[0m")
-        print(json.dumps(config.model_dump(), indent=2, ensure_ascii=False))
+        print(config)
+        return JSONResponse(content={"success": True, "config": config.model_dump()})    
+    except Exception as e:
+        print(f"Error: {e}")
+        return JSONResponse(content={"success": False, "error": str(e)})
+# Optional: enable running server with python run.py
+if __name__ == "__main__":
+    uvicorn.run("run:app", host="0.0.0.0", port=8000, reload=True)
 
