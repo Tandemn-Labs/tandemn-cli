@@ -65,3 +65,7 @@ class SolverResponse(BaseModel):
     success: bool
     config: Optional[JobConfig] = None
     error: Optional[str] = None
+
+# class SendToCentralServerRequestBatched(BaseModel):
+"""esentially, this just takes the model name and the JobConfig and sends it to the central server"""
+#     pass
