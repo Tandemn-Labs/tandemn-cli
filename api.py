@@ -4,6 +4,8 @@ import httpx
 from typing import Optional, List
 from pydantic import ValidationError
 from fastapi import HTTPException
+import json
+
 class TandemnAPI:
     """
     The ClientSide API that calls the Serverless API Endpoints for 
@@ -67,7 +69,7 @@ class TandemnAPI:
             Cluster(
                 id = c["id"],
                 name = c["name"],
-                description = c["description"]
+                description = c.get("description", "")  # Default to empty string if not present
             ) for c in clusters
         ]
         if not clusters_list:
@@ -95,15 +97,16 @@ class TandemnAPI:
         """
         client = await self._get_client()
         
-        # If it's a list, take the first one for now to satisfy the 'cluster' field requirement
-        # If it's a string, just use it.
         selected_cluster = cluster_names
         if isinstance(cluster_names, list):
-             selected_cluster = cluster_names[0] if cluster_names else ""
+            #  selected_cluster = cluster_names[0] if cluster_names else ""
+            selected_cluster = cluster_names
+        else:
+            selected_cluster = [cluster_names]
              
         response = await client.post(
             f"{self.base_url}/select-cluster",
-            json = {"apiKey": api_key, "cluster": selected_cluster} # Changed 'clusters' to 'cluster'
+            json = {"apiKey": api_key, "clusters": selected_cluster} # Changed 'clusters' to 'cluster'
         )
         
         data = response.json()
@@ -116,18 +119,20 @@ class TandemnAPI:
                 message = msg,
                 error = data.get("error", None)
             )
-        cluster_val = data.get("cluster")
+        
+        # API returns clusters as a list of strings ["Tandemn"]
+        cluster_names_from_api = data.get("clusters", [])
         clusters_list = [
-             Cluster(id=cluster_val, name=cluster_val, description="") 
-        ] if cluster_val else []
-
+             Cluster(id=name, name=name, description="") 
+             for name in cluster_names_from_api
+        ]
 
         # Assuming we have selected the correct cluster, we can now return the Session Object
         return Session(
             success = True,
-            session_token = data.get("sessionToken"),  # API uses camelCase
+            session_token = data.get("session_token"),  # API uses snake_case
             clusters = clusters_list,
-            expires_at = data.get("expiresAt"),  # API uses camelCase
+            expires_at = data.get("expires_at"),  # API uses snake_case
             message = data.get("message", None),
             error = data.get("error", None)
         )
@@ -136,40 +141,42 @@ class TandemnAPI:
     # STORAGE API
     # ============================================================================
 
-    async def presign_upload(self, remote_path: str, user: str, expires: int = 600) -> dict:
+    async def presign_upload(self, session_token: str, remote_path: str, expires: int = 600) -> dict:
         """
         Get a presigned URL for single-file upload (<500MB).
         """
         client = await self._get_client()
         response = await client.post(
-            f"{self.base_url}/storage/presign/upload",
-            data={"remote_path": remote_path,"user": user, "expires": expires}
+            f"{self.base_url}/upload",
+            headers={"Authorization": f"Bearer {session_token}"},
+            json={"remote_path": remote_path, "expires": expires}
         )
         response.raise_for_status()
         return response.json()
 
-    async def multipart_start(self, remote_path: str, user: str) -> dict:
+    async def multipart_start(self, session_token: str, remote_path: str) -> dict:
         """
         Start a multipart upload. Returns upload_id.
         """
         client = await self._get_client()
         response = await client.post(
-            f"{self.base_url}/storage/multipart/start",
-            data={"remote_path": remote_path, "user": user}
+            f"{self.base_url}/multipart/start",
+            headers={"Authorization": f"Bearer {session_token}"},
+            json={"remote_path": remote_path}
         )
         response.raise_for_status()
         return response.json()
 
-    async def multipart_sign_part(self, upload_id: str, user: str, remote_path: str, part_number: int, expires: int = 600) -> dict:
+    async def multipart_sign_part(self, session_token: str, upload_id: str, remote_path: str, part_number: int, expires: int = 600) -> dict:
         """
         Get a presigned URL for a specific part.
         """
         client = await self._get_client()
         response = await client.post(
-            f"{self.base_url}/storage/multipart/sign-part",
-            data={
+            f"{self.base_url}/multipart/sign-part",
+            headers={"Authorization": f"Bearer {session_token}"},
+            json={
                 "upload_id": upload_id,
-                "user": user,
                 "remote_path": remote_path,
                 "part_number": part_number,
                 "expires": expires
@@ -178,37 +185,38 @@ class TandemnAPI:
         response.raise_for_status()
         return response.json()
 
-    async def multipart_complete(self, user: str, remote_path: str, upload_id: str, parts: List[dict]) -> dict:
+    async def multipart_complete(self, session_token: str, remote_path: str, upload_id: str, parts: List[dict]) -> dict:
         """
         Complete a multipart upload.
         """
-        import json
+
         client = await self._get_client()
         response = await client.post(
-            f"{self.base_url}/storage/multipart/complete",
-            data={
-                "user": user,
+            f"{self.base_url}/multipart/complete",
+            headers={"Authorization": f"Bearer {session_token}"},
+            json={
                 "remote_path": remote_path,
                 "upload_id": upload_id,
-                "parts": json.dumps(parts)
+                "parts": parts
             }
         )
         response.raise_for_status()
         return response.json()
 
-    async def list_files(self, user: str, prefix: str = "") -> dict:
+    async def list_files(self, session_token: str, prefix: str = "") -> dict:
         """
         List all files for a user.
         """
         client = await self._get_client()
         response = await client.get(
-            f"{self.base_url}/storage/list/{user}",
+            f"{self.base_url}/list",
+            headers={"Authorization": f"Bearer {session_token}"},
             params={"prefix": prefix}
         )
         response.raise_for_status()
         return response.json()
 
-    async def download_file(self, user: str, remote_path: str, local_path: str) -> None:
+    async def download_file(self, session_token: str, remote_path: str, local_path: str) -> None:
         """
         Download a file from storage.
         """
@@ -218,13 +226,17 @@ class TandemnAPI:
             remote_path = remote_path.split("/")[-1]
             
         client = await self._get_client()
-        async with client.stream("GET", f"{self.base_url}/storage/download/{user}/{remote_path}") as response:
+        async with client.stream("GET",
+         f"{self.base_url}/download",
+        headers={"Authorization": f"Bearer {session_token}"},
+        params={"remote_path": remote_path}
+        ) as response:
             response.raise_for_status()
             with open(local_path, "wb") as f:
                 async for chunk in response.aiter_bytes(chunk_size=8192):
                     f.write(chunk)
 
-    async def delete_file(self, user: str, remote_path: str) -> dict:
+    async def delete_file(self, session_token: str, remote_path: str) -> dict:
         """
         Delete a file from storage.
         """
@@ -234,7 +246,11 @@ class TandemnAPI:
             remote_path = remote_path.split("/")[-1]
             
         client = await self._get_client()
-        response = await client.delete(f"{self.base_url}/storage/delete/{user}/{remote_path}")
+        response = await client.delete(
+            f"{self.base_url}/delete",
+            headers={"Authorization": f"Bearer {session_token}"},
+            params={"remote_path": remote_path}
+        )
         response.raise_for_status()
         return response.json()
 
@@ -242,14 +258,14 @@ class TandemnAPI:
     # SOLVER API
     # ============================================================================
 
-    async def submit_solver_prompt(self, prompt: str, user_id: str) -> dict:
+    async def submit_solver_prompt(self, prompt: str, session_token: str) -> dict:
         """
         Submit a natural language prompt to the solver API.
         The solver will process the prompt using GPT and return a structured config.
         
         Args:
             prompt: Natural language description of the job requirements (max 500 chars)
-            user_id: The user ID from the session
+            session_token: The session token from select_cluster response
             
         Returns:
             dict: Structured job configuration from the solver
@@ -268,14 +284,15 @@ class TandemnAPI:
         """
         client = await self._get_client()
         
-        # TODO: Replace with actual solver endpoint URL when ready
-        solver_endpoint = f"{self.base_url}/extract"
+        solver_endpoint = f"{self.base_url}/jobs/extract"
         
         response = await client.post(
             solver_endpoint,
+            headers={
+                "Authorization": f"Bearer {session_token}"
+            },
             json={
-                "prompt": prompt,
-                "user_id": user_id
+                "prompt": prompt
             }
         )
         response.raise_for_status()
@@ -288,6 +305,47 @@ class TandemnAPI:
         except ValidationError as e:
             raise ValidationError(f"Invalid response format: {str(e)}")
         except httpx.HTTPStatusError as e:
-            raise HTTPException(status_code=e.response.status_code, detail=e.response.text) 
+            raise HTTPException(status_code=e.response.status_code, detail=e.response.text)
+
+    async def submit_job(self, session_token: str, job_config: dict) -> dict:
+        """
+        Submit a job to the Tandemn orchestrator.
+        
+        Args:
+            session_token: The session token from select_cluster response
+            job_config: Dictionary containing job configuration with fields like:
+                - task_mode: str (e.g., "batched_inference")
+                - model_name: str (e.g., "llama-70b-hf")
+                - backend: str (e.g., "vllm")
+                - quantization: str (e.g., "awq")
+                - dataset_path: str (e.g., "s3://...")
+                - column_names: list (e.g., ["prompt", "response"])
+                - slo: str (e.g., "2h")
+                - generation_kwargs: dict (optional)
+                
+        Returns:
+            dict: Job submission response
+            
+        Example response:
+        {
+            "status": "success",
+            "job_id": "uuid-here",
+            "message": "Job {job_id} submitted successfully",
+            "application_queue_key": "tandemn:app_jobs:llama-70b-hf:batched_inference:vllm:awq"
+        }
+        """
+        client = await self._get_client()
+        
+        submit_endpoint = f"{self.base_url}/jobs/submit"
+        
+        response = await client.post(
+            submit_endpoint,
+            headers={
+                "Authorization": f"Bearer {session_token}"
+            },
+            json=job_config
+        )
+        response.raise_for_status()
+        return response.json()
     
 
