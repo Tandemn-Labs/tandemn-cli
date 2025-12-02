@@ -13,7 +13,7 @@ class Cluster:
     """
     id:str
     name:str
-    description:str # not sure if needed
+    description:str = "" 
 
 @dataclass
 class LoginResponse:
