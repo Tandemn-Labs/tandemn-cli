@@ -232,7 +232,7 @@ class LoginScreen(Screen):
         else:
             for c in result.clusters:
                 item = ListItem(
-                    Static(f"{c.name} — {c.description}", expand=True)
+                    Static(f"{c.name}", expand=True)
                 )
                 # stash cluster object
                 item.data = c
@@ -269,6 +269,11 @@ class LoginScreen(Screen):
         if not session.success:
              self.status.update(f"[err]{session.message or session.error}[/]")
              return
+
+        # Verify clusters were returned
+        if not session.clusters:
+            self.status.update("[err]No clusters returned from API[/]")
+            return
 
         # fuse login + session info
         full_session = Session(
