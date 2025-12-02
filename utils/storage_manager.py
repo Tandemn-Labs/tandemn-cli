@@ -12,9 +12,9 @@ CHUNK_SIZE = 64 * 1024 * 1024  # 64MB chunks for multipart
 MULTIPART_THRESHOLD = 100 * 1024 * 1024  # 100MB
 
 class UploadTask:
-    def __init__(self, file_path: Path, user_id: str, remote_path: str):
+    def __init__(self, file_path: Path, session_token: str, remote_path: str):
         self.file_path = file_path
-        self.user_id = user_id
+        self.session_token = session_token
         self.remote_path = remote_path
         self.size = file_path.stat().st_size
         self.status = "pending" # pending, uploading, paused, completed, error
@@ -79,7 +79,7 @@ class UploadManager:
         if self.STATE_FILE.exists():
             print(f"DEBUG: Found existing state file at {self.STATE_FILE}")
 
-    async def add_files(self, files: List[Path], user_id: str, remote_prefix: str = ""):
+    async def add_files(self, files: List[Path], session_token: str, remote_prefix: str = ""):
         """
         Add files to upload queue. Returns a result dict with validation info.
         
@@ -89,7 +89,7 @@ class UploadManager:
                 "skipped": [list of (filename, error_reason) tuples],
             }
         """
-        print(f"DEBUG: Adding {len(files)} files to upload queue for user {user_id}")
+        print(f"DEBUG: Adding {len(files)} files to upload queue for session {session_token}")
         
         result = {"queued": [], "skipped": []}
         
@@ -108,7 +108,7 @@ class UploadManager:
             if remote_prefix:
                 remote_path = f"{remote_prefix}/{f.name}"
                 
-            task = UploadTask(f, user_id, remote_path)
+            task = UploadTask(f, session_token, remote_path)
             self.queue.append(task)
             result["queued"].append(f.name)
             
@@ -203,7 +203,7 @@ class UploadManager:
     async def _upload_single(self, task: UploadTask):
         # Get presigned URL
         print(f"DEBUG: Requesting presigned URL for {task.remote_path}")
-        presigned = await self.api.presign_upload(task.remote_path, task.user_id)
+        presigned = await self.api.presign_upload(task.session_token, task.remote_path)
         print(f"DEBUG: Presigned response: {presigned}")  # <-- ADD THIS
         url = presigned["url"]
         headers = presigned.get("headers", {})
@@ -223,7 +223,7 @@ class UploadManager:
     async def _upload_multipart(self, task: UploadTask):
         print(f"DEBUG: Starting multipart upload for {task.remote_path}")
         # Start
-        start_res = await self.api.multipart_start(task.remote_path, task.user_id)
+        start_res = await self.api.multipart_start(task.session_token, task.remote_path)
         upload_id = start_res["upload_id"]
         task.upload_id = upload_id
         
@@ -240,7 +240,7 @@ class UploadManager:
                 print(f"DEBUG: Uploading part {part_number} for {task.remote_path}")
                 
                 # Get sign part
-                sign_res = await self.api.multipart_sign_part(upload_id, task.user_id, task.remote_path, part_number)
+                sign_res = await self.api.multipart_sign_part(task.session_token, upload_id, task.remote_path, part_number)
                 url = sign_res["url"]
                 headers = sign_res.get("headers", {})
                 
@@ -264,7 +264,7 @@ class UploadManager:
                 
         # Complete
         print(f"DEBUG: Completing multipart upload for {task.remote_path}")
-        await self.api.multipart_complete(task.user_id, task.remote_path, upload_id, parts)
+        await self.api.multipart_complete(task.session_token, task.remote_path, upload_id, parts)
 
 
 

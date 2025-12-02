@@ -75,10 +75,10 @@ class FileListScreen(ModalScreen[Optional[str]]):
     }
     """
 
-    def __init__(self, files: list, user_id: str, api, selection_mode: bool = False, **kwargs) -> None:
+    def __init__(self, files: list, session_token: str, api, selection_mode: bool = False, **kwargs) -> None:
         super().__init__(**kwargs)
         self.files = files
-        self.user_id = user_id
+        self.session_token = session_token
         self.api = api
         self.selected_file = None
         self.selection_mode = selection_mode  # If True, shows Select button instead of Download/Delete
@@ -144,7 +144,7 @@ class FileListScreen(ModalScreen[Optional[str]]):
         
         try:
             self.query_one("#selected-file").update(f"⬇️ Downloading {filename}...")
-            await self.api.download_file(self.user_id, self.selected_file, str(save_path))
+            await self.api.download_file(self.session_token, self.selected_file, str(save_path))
             self.query_one("#selected-file").update(f"✅ Downloaded to {save_path}")
         except Exception as e:
             self.query_one("#selected-file").update(f"❌ Download failed: {e}")
@@ -160,7 +160,7 @@ class FileListScreen(ModalScreen[Optional[str]]):
         
         try:
             self.query_one("#selected-file").update(f"🗑️ Deleting {filename}...")
-            await self.api.delete_file(self.user_id, self.selected_file)
+            await self.api.delete_file(self.session_token, self.selected_file)
             
             # Remove from UI
             list_view = self.query_one(ListView)

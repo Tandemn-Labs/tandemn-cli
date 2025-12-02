@@ -185,12 +185,12 @@ class PromptModal(ModalScreen[Optional[dict]]):
         try:
             # Get session info from app
             session = self.app.session if hasattr(self.app, 'session') else None
-            if not session or not session.user_id:
-                self.notify("User ID missing from session", severity="error")
+            if not session or not session.session_token:
+                self.notify("Session token missing. Please log in again.", severity="error")
                 return
             
             # Call the solver API
-            result = await self.app.api.submit_solver_prompt(text, session.user_id)
+            result = await self.app.api.submit_solver_prompt(text, session.session_token)
             
             # Check result and dismiss with data
             if result.get("success"):
@@ -208,7 +208,7 @@ class PromptModal(ModalScreen[Optional[dict]]):
                     
                     # Fetch user files and show file selector
                     try:
-                        files_result = await self.app.api.list_files(session.user_id)
+                        files_result = await self.app.api.list_files(session.session_token)
                         files = files_result.get("files", [])
                         
                         if not files:
@@ -221,7 +221,7 @@ class PromptModal(ModalScreen[Optional[dict]]):
                         
                         # Open file selector in selection mode
                         selected_file = await self.app.push_screen_wait(
-                            FileListScreen(files, session.user_id, self.app.api, selection_mode=True)
+                            FileListScreen(files, session.session_token, self.app.api, selection_mode=True)
                         )
                         
                         if selected_file:

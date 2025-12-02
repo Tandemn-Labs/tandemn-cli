@@ -9,9 +9,11 @@ from textual.screen import Screen
 from textual.widgets import Button, Footer, Static
 
 from models.login import Session
+from models.solver import JobConfig, SendToCentralServerRequestBatched
 from screens.file_browser import FileBrowserScreen
 from screens.file_list import FileListScreen
 from screens.prompt_modal import PromptModal
+from screens.json_editor import JsonEditorScreen
 
 
 class WelcomeScreen(Screen):
@@ -142,7 +144,7 @@ class WelcomeScreen(Screen):
         
         try:
             # Fetch files from storage
-            result = await self.app.api.list_files(user_id)
+            result = await self.app.api.list_files(self.session.session_token)
             files = result.get("files", [])
             
             if not files:
@@ -150,7 +152,7 @@ class WelcomeScreen(Screen):
                 return
             
             # Show file list screen with user_id and api
-            await self.app.push_screen_wait(FileListScreen(files, user_id, self.app.api))
+            await self.app.push_screen_wait(FileListScreen(files, self.session.session_token, self.app.api))
         except Exception as e:
             self.query_one("#selected-path").update(f"Error loading files: {e}")
             self.log(f"Error loading files: {e}")
@@ -172,14 +174,14 @@ class WelcomeScreen(Screen):
             manager.set_callback(self.update_upload_status)
             
             # Use user_id from session
-            user_id = self.session.user_id
-            if not user_id:
+            session_token = self.session.session_token
+            if not session_token:
                 self.query_one("#selected-path").update("Error: User ID missing from session")
                 self.log("Error: User ID missing from session")
                 return
             
             # Add files and get validation result
-            result = await manager.add_files(files, user_id)
+            result = await manager.add_files(files, session_token)
             
             queued = result["queued"]
             skipped = result["skipped"]
@@ -216,39 +218,72 @@ class WelcomeScreen(Screen):
         # Push the prompt modal and wait for result
         result = await self.app.push_screen_wait(PromptModal())
         
-        if result:
-            # Modal already called API and returned result
-            config = result.get("config", {})
-            description = config.get('meta', {}).get('description', 'N/A')
-            task_type = config.get("task", {}).get("type", "")
-            selected_file = result.get("selected_file")
+        if not result:
+            self.query_one("#selected-path").update("Prompt submission cancelled")
+            self.log("Prompt submission cancelled")
+            return
             
-            # Build status message
+        # Get config and selected file
+        config_dict = result.get("config", {})
+        selected_file = result.get("selected_file")
+        task_type = config_dict.get("task", {}).get("type", "")
+        
+        # If batched_inference and file selected, reconstruct JobConfig and show editor
+        if task_type == "batched_inference" and selected_file:
+            try:
+                # Reconstruct JobConfig from the solver response
+                job_config = JobConfig(**config_dict)
+                
+                # Create SendToCentralServerRequestBatched
+                batch_request = SendToCentralServerRequestBatched(
+                    job_config=job_config,
+                    selected_file=selected_file,
+                    user_id=self.session.user_id
+                )
+                
+                # Convert to dict for JSON editor
+                batch_request_dict = batch_request.model_dump()
+                
+                # Open JSON editor for user review
+                edited_config = await self.app.push_screen_wait(
+                    JsonEditorScreen(batch_request_dict)
+                )
+                
+                if edited_config:
+                    # User confirmed the config
+                    description = edited_config.get("job_config", {}).get("meta", {}).get("description", "N/A")
+                    filename = edited_config.get("selected_file", "").split('/')[-1]
+                    
+                    status_msg = f"✅ Config confirmed: {description} | File: {filename}"
+                    self.query_one("#selected-path").update(status_msg)
+                    self.notify("Config ready to submit!", severity="information")
+                    
+                    # Pretty print to console
+                    print(f"\n{'='*80}")
+                    print(f"BATCHED INFERENCE JOB CONFIG:")
+                    print(json.dumps(edited_config, indent=2))
+                    print(f"{'='*80}\n")
+                    
+                    # TODO: Send to central server API
+                    # await self.app.api.submit_batched_job(edited_config)
+                    
+                else:
+                    self.query_one("#selected-path").update("Config editing cancelled")
+                    self.log("Config editing cancelled")
+                    
+            except Exception as e:
+                error_msg = f"Error processing config: {str(e)}"
+                self.query_one("#selected-path").update(error_msg)
+                self.notify(error_msg, severity="error")
+                self.log(error_msg)
+        else:
+            # Not batched inference or no file selected
+            description = config_dict.get('meta', {}).get('description', 'N/A')
             status_msg = f"✅ Config ready: {description}"
-            if selected_file:
-                filename = selected_file.split('/')[-1]
-                status_msg += f" | File: {filename}"
             
             self.query_one("#selected-path").update(status_msg)
             self.notify("Prompt processed successfully!", severity="information")
             
-            # Log full result
-            log_data = {
-                "config": config,
-                "selected_file": selected_file
-            }
+            log_data = {"config": config_dict}
             self.log(f"Solver result: {json.dumps(log_data, indent=4)}")
-            
-            # Print the selected file if present
-            if selected_file:
-                print(f"\n{'='*60}")
-                print(f"SELECTED FILE FOR BATCHED INFERENCE:")
-                print(f"  Task Type: {task_type}")
-                print(f"  File Path: {selected_file}")
-                print(f"  Filename: {selected_file.split('/')[-1]}")
-                print(f"{'='*60}\n")
-        else:
-            # User cancelled or error occurred
-            self.query_one("#selected-path").update("Prompt submission cancelled")
-            self.log("Prompt submission cancelled")
 
