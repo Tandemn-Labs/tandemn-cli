@@ -2,7 +2,8 @@ from models.login import Cluster, LoginResponse, Session
 from models.solver import SolverResponse
 import httpx
 from typing import Optional, List
-
+from pydantic import ValidationError
+from fastapi import HTTPException
 class TandemnAPI:
     """
     The ClientSide API that calls the Serverless API Endpoints for 
@@ -268,7 +269,7 @@ class TandemnAPI:
         client = await self._get_client()
         
         # TODO: Replace with actual solver endpoint URL when ready
-        solver_endpoint = "http://0.0.0.0:8000/extract"
+        solver_endpoint = f"{self.base_url}/extract"
         
         response = await client.post(
             solver_endpoint,
@@ -284,12 +285,9 @@ class TandemnAPI:
         try:
             validated = SolverResponse(**data)
             return validated.model_dump()
-        except Exception as e:
-            # If validation fails, return error response
-            return {
-                "success": False,
-                "error": f"Invalid response format: {str(e)}",
-                "config": None
-            }
-
+        except ValidationError as e:
+            raise ValidationError(f"Invalid response format: {str(e)}")
+        except httpx.HTTPStatusError as e:
+            raise HTTPException(status_code=e.response.status_code, detail=e.response.text) 
+    
 
