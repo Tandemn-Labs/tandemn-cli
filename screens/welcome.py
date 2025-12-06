@@ -265,7 +265,7 @@ class WelcomeScreen(Screen):
                     print(f"{'='*80}\n")
                     
                     # TODO: Send to central server API
-                    # await self.app.api.submit_batched_job(edited_config)
+                    await self.app.api.submit_job(self.session.session_token, edited_config)
                     
                 else:
                     self.query_one("#selected-path").update("Config editing cancelled")
