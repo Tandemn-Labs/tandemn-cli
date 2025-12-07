@@ -304,8 +304,6 @@ class TandemnAPI:
             return validated.model_dump()
         except ValidationError as e:
             raise ValidationError(f"Invalid response format: {str(e)}")
-        except httpx.HTTPStatusError as e:
-            raise HTTPException(status_code=e.response.status_code, detail=e.response.text)
 
     async def submit_job(self, session_token: str, job_config: dict) -> dict:
         """
