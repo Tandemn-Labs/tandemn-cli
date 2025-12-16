@@ -20,17 +20,27 @@ model:
   model_name: ____   # [type:str] The name of the model to use. This should be not_specified for batched_inference. 
   But for others, do take in the model name.
   engine: ____      # [type:str] vllm | sglang | diffusers | xDIT | not_specified
-  tokenizer: ____   # [type:str] huggingface | mistral | not_specified
-  max_context: ____ # [type:int] Put "not_specified" if not told
-  max_model_len: ____ # [type:int] Put "not_specified" if not told
-  dtype: ____       # [type:str] fp32 | bf16 | fp16 | fp8 | fp4 | int8 | int4 | not_specified
+                    # the business logic is that whenever batched inference is detected, always use vllm or sglang
+                    # if image generation is asked default to diffusers or xdit.
+                    # vllm or sglang DO NOT SUPPORT Image generation and similarly
+                    # xDIT and Diffusers DO NOT SUPPORT batched/online inference
   quantization:
-    method: ____    # [type:str] none | int8 | gptq | awq | gguf | a8w8 | w4a8 | not_specified
-    bits: ____      # [type:str] if applicable, else "not_specified"
+    bits: ____      # [type:int] if applicable, else "not_specified"
   features:
     speculative_decode:   # [type:str] true | false | not_specified
-    continuous_batching:  # [type:str] true | false | not_specified
     PD_disaggregation:    # [type:str] true | false | not_specified
+  vllm_specific_config:
+    # Please fill this ONLY if vLLM as an engine is detected
+    # otherwise keep all as "not_specified"
+    max_model_len:   # [type:int] if applicable, else "not_specified"
+    trust_remote_code:  # [type:bool] if applicable, else "not_specified"
+    max_num_seqs:   #[type:int] if applicable, else "not_specified"
+    max_num_batched_tokens  #[type:int] if applicable, else "not_specified"
+    config_format: # [type:str] Options : auto | mistral | "not_specified"
+                   # whenever the model belongs to mistral, devstral, ministral, mixtral families
+                   # put mistral
+    limit_mm_per_prompt: # [type:int] This means how many images/files are allowed to be 
+                         # uploaded in the model. Usually "not_specified"
 
 slo:
   mode: ____        # [type:str] offline | online
