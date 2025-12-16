@@ -7,50 +7,63 @@ from typing import Literal, Optional, Union
 from pydantic import BaseModel
 
 
+### Below Classes for LLM to fill###############
+#### Description Configuration ##
 class MetaConfig(BaseModel):
     description: str
+#################################
 
-
-class TaskConfig(BaseModel):
+## Task specific configuration ##
+class TaskConfig(BaseModel):    
     type: Literal["batched_inference", "online_serving", "embeddings", "image_generation"]
     priority: Literal["low", "normal", "high", "urgent"]
+#################################
 
-
+## Model Specific Configurations ##
 class QuantizationConfig(BaseModel):
-    method: Literal["none", "int8", "gptq", "awq", "gguf", "a8w8", "w4a8", "not_specified"]
     bits: str  # e.g. "8", "4", "not_specified"
-
 
 class FeatureConfig(BaseModel):
     speculative_decode: Literal["true", "false", "not_specified"]
-    continuous_batching: Literal["true", "false", "not_specified"]
     PD_disaggregation: Literal["true", "false", "not_specified"]
 
+class VLLMConfig(BaseModel):
+    max_model_len: Optional[int] = None
+    trust_remote_code: Optional[bool] = None
+    max_num_seqs: Optional[int] = None
+    max_num_batched_tokens: Optional[int] = None
+    config_format: Optional[Literal["auto", "mistral"]] = None
+    limit_mm_per_prompt: Optional[int] = None
 
 class ModelConfig(BaseModel):
     model_name: Optional[str] = None
     engine: Literal["vllm", "sglang", "diffusers", "xDIT", "not_specified"]
-    tokenizer: Literal["huggingface", "mistral", "not_specified"]
-    max_context: Union[int, Literal["not_specified"]]
-    max_model_len: Union[int, Literal["not_specified"]]
-    dtype: Literal["fp32", "bf16", "fp16", "fp8", "fp4", "int8", "int4", "not_specified"]
     quantization: QuantizationConfig
     features: FeatureConfig
+    vllm_config: VLLMConfig
+    # ----- sglang_specific_config: SGLangSpecificConfig ----
+    # ----- diffusers_specific_config: DiffusersSpecificConfig ----
+    # ----- xDIT_specific_config: XDITSpecificConfig ----
 
 
+####################################
+
+## SLO specific configuration ##
 class OfflineSLO(BaseModel):
     deadline_hours: Union[int, Literal["not_specified"]]
-
 
 class SLOConfig(BaseModel):
     mode: Literal["offline", "online"]
     offline: Optional[OfflineSLO] = None
+    # online : ----- to be added later ------
+#################################
 
-
+## Placement specific configuration ##
 class PlacementConfig(BaseModel):
     sku_preferences: str  # e.g. "H100", "A100", "L40S" or "not_specified"
+#################################
 
-
+## Culmination of all these specific configurations ##
 class JobConfig(BaseModel):
     """Main config structure returned by solver."""
     meta: MetaConfig
@@ -58,7 +71,7 @@ class JobConfig(BaseModel):
     model: ModelConfig
     slo: SLOConfig
     placement: PlacementConfig
-
+#################################
 
 class SolverResponse(BaseModel):
     """Response from solver API endpoint."""
@@ -67,8 +80,3 @@ class SolverResponse(BaseModel):
     error: Optional[str] = None
 
 
-class SendToCentralServerRequestBatched(BaseModel):
-    """Request to send batched inference job to central server."""
-    job_config: JobConfig
-    selected_file: str  # S3 path to the file
-    user_id: str
