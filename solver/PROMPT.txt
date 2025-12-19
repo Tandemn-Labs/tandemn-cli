@@ -17,7 +17,7 @@ JobConfig:
     priority: "low" | "normal" | "high" | "urgent"
   
   model:
-    model_name: string | null (null for batched_inference, actual model name for others)
+    model_name: string 
     engine: "vllm" | "sglang" | "diffusers" | "xDIT" | "not_specified"
     quantization:
       bits: string (e.g., "4", "8", or "not_specified")
@@ -66,7 +66,6 @@ Engine Selection:
 - Otherwise → "not_specified"
 
 Model Name:
-- For batched_inference: set to null (user will select file later)
 - For other task types: extract the exact model name mentioned
 - If no model mentioned: null
 
@@ -110,7 +109,7 @@ Output:
   "meta": {"description": "Llama 70B batched inference"},
   "task": {"type": "batched_inference", "priority": "normal"},
   "model": {
-    "model_name": null,
+    "model_name": "meta-llama/Llama-2-70b-hf",
     "engine": "vllm",
     "quantization": {"bits": "not_specified"},
     "features": {"speculative_decode": "not_specified", "PD_disaggregation": "not_specified"},
@@ -177,7 +176,6 @@ VALIDATION CHECKLIST:
 - meta.description is concise and descriptive
 - task.type matches one of the four allowed values
 - task.priority is appropriate for the SLO mode and deadline
-- model.model_name is null for batched_inference, string for others
 - model.engine matches task type compatibility (vllm/sglang for inference, diffusers/xDIT for images)
 - vllm_specific_config is only filled when engine is "vllm", otherwise all null
 - slo.mode is "online" for online_serving and image_generation
