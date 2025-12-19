@@ -48,7 +48,7 @@ def get_compatible_mtp_method(model_family: str):
     }
     return mtp_mapping.get(model_family)
 
-def convert_to_central_server_config(JobConfig: JobConfig, user_id: str):
+def convert_to_central_server_config(JobConfig: JobConfig, user_id: str, selected_file: str):
     """
     this is to take all the inputs of the job_config, 
     welcome screen and then validate it, and then send it
@@ -71,14 +71,16 @@ def convert_to_central_server_config(JobConfig: JobConfig, user_id: str):
                             is_PD_disaggregation=JobConfig.model.features.PD_disaggregation,
                             slo_mode=JobConfig.slo.mode,
                             placement=JobConfig.placement.sku_preferences)
+    if selected_file:
+        central_server_config.selected_file = selected_file
     
     # Step 2 - check if we can even get the config from the huggingface
-    config = get_config_from_hf(JobConfig.model.model_name)
+    config = get_config_from_hf(central_server_config.model_name)
     if config is None:
         raise Exception(f"Failed to get config from Hugging Face, please check if the model exists")
     # Step 3 - Find Quantization Method for this Model
     quantization_provided_by_user = JobConfig.model.quantization.bits
-    if JobConfig.model.quantization.bits:
+    if JobConfig.model.quantization.bits!="not_specified":
         try: 
             quantization_config = config.get("quantization_config", None)
             # check if the quantization is BNB? If yes, accept and forward as is

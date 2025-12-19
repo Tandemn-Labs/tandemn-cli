@@ -238,8 +238,8 @@ class WelcomeScreen(Screen):
                 job_config = JobConfig(**config_dict)
 
                 # now convert to central server config
-                central_server_config = convert_to_central_server_config(job_config, self.session.user_id)
-                central_server_config.selected_file = selected_file
+                central_server_config = convert_to_central_server_config(job_config, self.session.user_id, selected_file)
+                # central_server_config.selected_file = selected_file
                 
                 # # Create SendToCentralServerRequestBatched
                 # batch_request = SendToCentralServerRequestBatched(

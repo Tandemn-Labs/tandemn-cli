@@ -42,15 +42,15 @@ class SpeculativeConfig(BaseModel):
 
 class vLLMSpecificConfig(BaseModel):
     # persona 3 config
-    max_model_len: int
-    trust_remote_code: bool # default is True
-    max_num_seqs: int 
-    max_num_batched_tokens: int
-    config_format: Literal["auto", "mistral"] # use mistral if mistral model is detected
+    max_model_len: Optional[int] = None
+    trust_remote_code: Optional[bool] = True # default is True
+    max_num_seqs: Optional[int] = None
+    max_num_batched_tokens: Optional[int] = None
+    config_format: Optional[Literal["auto", "mistral"]] = "auto" # use mistral if mistral model is detected
     # persona 2 config
     tokenizer: Optional[str] = None # leave this field blank if not specified (just the path of the tokenizer)
     tokenizer_mode: Optional[Literal["auto","deepseek","mistral"]] = "auto" # Leave this to Auto if not specified
-    kv_cache_dtype: Optional[Literal["auto","bfloat16","fp8","fp8_ds_mla","fp8_e4m3","fp8_e5m2","fp8_inc"]] = "auto"
+    kv_cache_dtype: Optional[Literal["auto","bfloat16","fp8","fp8_ds_mla","fp8_e4m3","fp8_e5m2","fp8_inc"]] = None
     speculative_config: Optional[SpeculativeConfig] = None
-    limit_mm_per_prompt: int # default is 20
+    limit_mm_per_prompt: Optional[int] = 20 # default is 20
     
