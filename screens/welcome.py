@@ -9,11 +9,14 @@ from textual.screen import Screen
 from textual.widgets import Button, Footer, Static
 
 from models.login import Session
-from models.solver import JobConfig, SendToCentralServerRequestBatched
+from models.solver import JobConfig
 from screens.file_browser import FileBrowserScreen
 from screens.file_list import FileListScreen
 from screens.prompt_modal import PromptModal
 from screens.json_editor import JsonEditorScreen
+
+# add the validatiom
+from config_validator import convert_to_central_server_config
 
 
 class WelcomeScreen(Screen):
@@ -233,16 +236,20 @@ class WelcomeScreen(Screen):
             try:
                 # Reconstruct JobConfig from the solver response
                 job_config = JobConfig(**config_dict)
+
+                # now convert to central server config
+                central_server_config = convert_to_central_server_config(job_config, self.session.user_id)
+                central_server_config.selected_file = selected_file
                 
-                # Create SendToCentralServerRequestBatched
-                batch_request = SendToCentralServerRequestBatched(
-                    job_config=job_config,
-                    selected_file=selected_file,
-                    user_id=self.session.user_id
-                )
+                # # Create SendToCentralServerRequestBatched
+                # batch_request = SendToCentralServerRequestBatched(
+                #     job_config=job_config,
+                #     selected_file=selected_file,
+                #     user_id=self.session.user_id
+                # )
                 
                 # Convert to dict for JSON editor
-                batch_request_dict = batch_request.model_dump()
+                batch_request_dict = central_server_config.model_dump()
                 
                 # Open JSON editor for user review
                 edited_config = await self.app.push_screen_wait(

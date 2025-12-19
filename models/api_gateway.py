@@ -1,10 +1,10 @@
 """
 This is the pydantic schema for the cli to send to the api_gateway
 """
+from __future__ import annotations
 from typing import Literal, Optional
 from pydantic import BaseModel
 from models.solver import QuantizationConfig, JobConfig
-
 
 class SendToCentralServerRequestBatched(BaseModel):
     """Request to send batched inference job to central server."""
@@ -23,7 +23,7 @@ class SendToCentralServerRequestBatched(BaseModel):
     placement : str
     # Only change the ModelSpecificCofig
     # right now its just vllm, but we can interject the parameters here
-    modelSpecificConfig: Optional["vLLMSpecificConfig"] = None
+    vllm_specific_config: Optional[vLLMSpecificConfig] = None
 
 
 
@@ -52,5 +52,5 @@ class vLLMSpecificConfig(BaseModel):
     tokenizer_mode: Optional[Literal["auto","deepseek","mistral"]] = "auto" # Leave this to Auto if not specified
     kv_cache_dtype: Optional[Literal["auto","bfloat16","fp8","fp8_ds_mla","fp8_e4m3","fp8_e5m2","fp8_inc"]] = "auto"
     speculative_config: Optional[SpeculativeConfig] = None
-    limit_mm_per_prompt: int # default is 999
+    limit_mm_per_prompt: int # default is 20
     

@@ -93,7 +93,9 @@ Quantization:
 
 Features:
 - speculative_decode: "true" only if explicitly mentioned, else "not_specified"
+There is no Speculative Decoding in Image Generation Frameworks and Models
 - PD_disaggregation: "true" only if explicitly mentioned, else "not_specified"
+There is no PD_disaggregation in Image Generation Frameworks and Models
 
 Placement:
 - Extract GPU types: "H100", "A100", "L40S", etc.
@@ -180,5 +182,6 @@ VALIDATION CHECKLIST:
 - vllm_specific_config is only filled when engine is "vllm", otherwise all null
 - slo.mode is "online" for online_serving and image_generation
 - All unmentioned fields use "not_specified" or null appropriately
+- If a person wants Image generation and they want either PD_disaggregation or SpeculativeDecoding, just put "not_specified"
 
 Now extract the configuration from the user's request.
