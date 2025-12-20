@@ -29,7 +29,7 @@ class TandemnAPI:
         to make the API Calls to the Tandemn API (serverless API)
         """
         if self._client is None:
-            self._client = httpx.AsyncClient(base_url=self.base_url, timeout=60.0)
+            self._client = httpx.AsyncClient(base_url=self.base_url, timeout=200.0)
         return self._client
 
     async def aclose(self) -> None:
@@ -303,7 +303,7 @@ class TandemnAPI:
             validated = SolverResponse(**data)
             return validated.model_dump()
         except ValidationError as e:
-            raise ValidationError(f"Invalid response format: {str(e)}")
+            raise RuntimeError(f"Invalid response format: {str(e)}")
 
     async def submit_job(self, session_token: str, job_config: dict) -> dict:
         """
