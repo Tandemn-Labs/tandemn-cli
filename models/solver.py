@@ -24,8 +24,8 @@ class QuantizationConfig(BaseModel):
     bits: str  # e.g. "8", "4", "not_specified"
 
 class FeatureConfig(BaseModel):
-    speculative_decode: Literal["true", "false", "not_specified"]
-    PD_disaggregation: Literal["true", "false", "not_specified"]
+    speculative_decode: Optional[bool] = None
+    PD_disaggregation: Optional[bool] = None
 
 class VLLMConfig(BaseModel):
     max_model_len: Optional[int] = None

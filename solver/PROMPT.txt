@@ -20,10 +20,10 @@ JobConfig:
     model_name: string 
     engine: "vllm" | "sglang" | "diffusers" | "xDIT" | "not_specified"
     quantization:
-      bits: string (e.g., "4", "8", or "not_specified")
+      bits: enum [4, 8 or None]
     features:
-      speculative_decode: "true" | "false" | "not_specified"
-      PD_disaggregation: "true" | "false" | "not_specified"
+      speculative_decode: true | false
+      PD_disaggregation: true | false
     vllm_config:
       max_model_len: integer | null
       trust_remote_code: boolean | null
@@ -35,7 +35,7 @@ JobConfig:
   slo:
     mode: "offline" | "online"
     offline:
-      deadline_hours: integer | "not_specified" (only if mode is offline)
+      deadline_hours: integer | None (only if mode is offline)
   
   placement:
     sku_preferences: string (e.g., "H100", "A100,H100", or "not_specified")
