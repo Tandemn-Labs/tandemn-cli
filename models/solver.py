@@ -21,7 +21,7 @@ class TaskConfig(BaseModel):
 
 ## Model Specific Configurations ##
 class QuantizationConfig(BaseModel):
-    bits: str  # e.g. "8", "4", "not_specified"
+    bits: Optional[Literal["4","8","16"]]=None
 
 class FeatureConfig(BaseModel):
     speculative_decode: Optional[bool] = None
@@ -50,7 +50,7 @@ class ModelConfig(BaseModel):
 
 ## SLO specific configuration ##
 class OfflineSLO(BaseModel):
-    deadline_hours: Union[int, Literal["not_specified"]]
+    deadline_hours: Optional[int] = None
 
 class SLOConfig(BaseModel):
     mode: Literal["offline", "online"]

@@ -80,7 +80,7 @@ def convert_to_central_server_config(JobConfig: JobConfig, user_id: str, selecte
         raise Exception(f"Failed to get config from Hugging Face, please check if the model exists")
     # Step 3 - Find Quantization Method for this Model
     quantization_provided_by_user = JobConfig.model.quantization.bits
-    if JobConfig.model.quantization.bits!="not_specified":
+    if JobConfig.model.quantization.bits is not None:
         try: 
             quantization_config = config.get("quantization_config", None)
             # check if the quantization is BNB? If yes, accept and forward as is
@@ -95,6 +95,9 @@ def convert_to_central_server_config(JobConfig: JobConfig, user_id: str, selecte
                 else:
                     #trust the user 
                     quantization_precision = quantization_provided_by_user
+            else:
+                # Use what the user specified
+                quantization_precision = quantization_provided_by_user
             # change the quantization_bits in the central server config
             central_server_config.quantization_bits = quantization_precision
         except Exception as e:
