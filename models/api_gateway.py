@@ -4,7 +4,6 @@ This is the pydantic schema for the cli to send to the api_gateway
 from __future__ import annotations
 from typing import Literal, Optional
 from pydantic import BaseModel
-from models.solver import QuantizationConfig, JobConfig
 
 class SendToCentralServerRequestBatched(BaseModel):
     """Request to send batched inference job to central server."""
@@ -17,13 +16,17 @@ class SendToCentralServerRequestBatched(BaseModel):
     model_name: Optional[str] = None
     engine: str 
     quantization_bits:str
-    is_speculative_decode: str
-    is_PD_disaggregation: str
+    is_speculative_decode: Optional[bool]  # none means not specified
+    is_PD_disaggregation: Optional[bool]  # none means not specified
     slo_mode : str
     placement : str
     # Only change the ModelSpecificCofig
     # right now its just vllm, but we can interject the parameters here
     vllm_specific_config: Optional[vLLMSpecificConfig] = None
+    # we will add this when we get there
+    # ----- sglang_specific_config: SGLangSpecificConfig ----
+    # ----- diffusers_specific_config: DiffusersSpecificConfig ----
+    # ----- xDIT_specific_config: XDITSpecificConfig ----
 
 
 

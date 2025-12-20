@@ -119,7 +119,7 @@ def convert_to_central_server_config(JobConfig: JobConfig, user_id: str, selecte
 
 
 def good_defaults(central_config: SendToCentralServerRequestBatched, model_config: dict):
-    if central_config.is_speculative_decode != "true":
+    if central_config.is_speculative_decode != True:
         return central_config
     ########################################################
     # Step 1 - Get good defaults for Speculative Decoding 
