@@ -15,7 +15,7 @@ class SendToCentralServerRequestBatched(BaseModel):
     task_priority : str
     model_name: Optional[str] = None
     engine: str 
-    quantization_bits:str
+    quantization_bits: Optional[Literal["4", "8", "16"]] = None
     is_speculative_decode: Optional[bool]  # none means not specified
     is_PD_disaggregation: Optional[bool]  # none means not specified
     slo_mode : str

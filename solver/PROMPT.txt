@@ -86,14 +86,13 @@ vLLM Specific Config:
 - If engine is NOT vllm, set all vllm_specific_config fields to null
 
 Quantization:
-- Extract bit width if mentioned: "4-bit" → "4", "8-bit" → "8"
-- If quantization mentioned but no bits: "not_specified"
-- If not mentioned at all: "not_specified"
+- Extract bit width if mentioned: "4-bit" → "4", "8-bit" → "8", "16-bit" → "16"
+- If not mentioned at all: null
 
 Features:
-- speculative_decode: "true" only if explicitly mentioned, else "not_specified"
+- speculative_decode: true only if explicitly mentioned, false if explicitly disabled, null otherwise
 There is no Speculative Decoding in Image Generation Frameworks and Models
-- PD_disaggregation: "true" only if explicitly mentioned, else "not_specified"
+- PD_disaggregation: true only if explicitly mentioned, false if explicitly disabled, null otherwise
 There is no PD_disaggregation in Image Generation Frameworks and Models
 
 Placement:
@@ -111,8 +110,8 @@ Output:
   "model": {
     "model_name": "meta-llama/Llama-2-70b-hf",
     "engine": "vllm",
-    "quantization": {"bits": "not_specified"},
-    "features": {"speculative_decode": "not_specified", "PD_disaggregation": "not_specified"},
+    "quantization": {"bits": null},
+    "features": {"speculative_decode": null, "PD_disaggregation": null},
     "vllm_specific_config": {
       "max_model_len": null,
       "trust_remote_code": null,
@@ -135,7 +134,7 @@ Output:
     "model_name": "mistralai/Mistral-7B-Instruct-v0.2",
     "engine": "vllm",
     "quantization": {"bits": "4"},
-    "features": {"speculative_decode": "not_specified", "PD_disaggregation": "not_specified"},
+    "features": {"speculative_decode": null, "PD_disaggregation": null},
     "vllm_specific_config": {
       "max_model_len": null,
       "trust_remote_code": null,
@@ -157,8 +156,8 @@ Output:
   "model": {
     "model_name": "stabilityai/stable-diffusion-xl-base-1.0",
     "engine": "diffusers",
-    "quantization": {"bits": "not_specified"},
-    "features": {"speculative_decode": "not_specified", "PD_disaggregation": "not_specified"},
+    "quantization": {"bits": null},
+    "features": {"speculative_decode": null, "PD_disaggregation": null},
     "vllm_specific_config": {
       "max_model_len": null,
       "trust_remote_code": null,
@@ -179,7 +178,7 @@ VALIDATION CHECKLIST:
 - model.engine matches task type compatibility (vllm/sglang for inference, diffusers/xDIT for images)
 - vllm_specific_config is only filled when engine is "vllm", otherwise all null
 - slo.mode is "online" for online_serving and image_generation
-- All unmentioned fields use "not_specified" or null appropriately
-- If a person wants Image generation and they want either PD_disaggregation or SpeculativeDecoding, just put "not_specified"
+- All unmentioned fields use null appropriately
+- If a person wants Image generation and they want either PD_disaggregation or SpeculativeDecoding, just put null
 
 Now extract the configuration from the user's request.
