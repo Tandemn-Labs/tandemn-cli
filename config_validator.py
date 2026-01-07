@@ -1,4 +1,4 @@
-from models.api_gateway import SendToCentralServerRequestBatched, vLLMSpecificConfig, SpeculativeConfig
+from models.api_gateway import BatchedRequest, vLLMSpecificConfig, SpeculativeConfig
 from models.solver import JobConfig
 import requests
 
@@ -59,7 +59,7 @@ def convert_to_central_server_config(JobConfig: JobConfig, user_id: str, selecte
     # then we add stuff to modelSpecificConfig
 
     # Step 1 - Build the SendToCentralServerRequestBatched object
-    central_server_config = SendToCentralServerRequestBatched(
+    central_server_config = BatchedRequest(
                             user_id=user_id,
                             description=JobConfig.meta.description,
                             task_type=JobConfig.task.type,
@@ -70,6 +70,7 @@ def convert_to_central_server_config(JobConfig: JobConfig, user_id: str, selecte
                             is_speculative_decode=JobConfig.model.features.speculative_decode,
                             is_PD_disaggregation=JobConfig.model.features.PD_disaggregation,
                             slo_mode=JobConfig.slo.mode,
+                            slo_deadline_hours=JobConfig.slo.offline.deadline_hours,
                             placement=JobConfig.placement.sku_preferences)
     if selected_file:
         central_server_config.selected_file = selected_file
@@ -121,7 +122,7 @@ def convert_to_central_server_config(JobConfig: JobConfig, user_id: str, selecte
     return central_server_config
 
 
-def good_defaults(central_config: SendToCentralServerRequestBatched, model_config: dict):
+def good_defaults(central_config: BatchedRequest, model_config: dict):
     if central_config.is_speculative_decode != True:
         return central_config
     ########################################################
