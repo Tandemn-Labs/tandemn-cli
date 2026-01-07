@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Literal, Optional
 from pydantic import BaseModel
 
-class SendToCentralServerRequestBatched(BaseModel):
+class BatchedRequest(BaseModel):
     """Request to send batched inference job to central server."""
     user_id: str
     selected_file: Optional[str] = None  # S3 path to the file
@@ -19,6 +19,7 @@ class SendToCentralServerRequestBatched(BaseModel):
     is_speculative_decode: Optional[bool]  # none means not specified
     is_PD_disaggregation: Optional[bool]  # none means not specified
     slo_mode : str
+    slo_deadline_hours: Optional[int] = None
     placement : str
     # Only change the ModelSpecificCofig
     # right now its just vllm, but we can interject the parameters here
