@@ -1,5 +1,5 @@
-from models.login import Cluster, LoginResponse, Session
-from models.solver import SolverResponse
+from shared.models.login import Cluster, LoginResponse, Session
+from shared.models.solver import SolverResponse
 import httpx
 from typing import Optional, List
 from pydantic import ValidationError
@@ -55,8 +55,6 @@ class TandemnAPI:
             f"{self.base_url}/login", # https://api.tandemn.com/api/cli/login
             json = {"apiKey": api_key}
         )
-        print(f"DEBUG: Status Code: {response.status_code}")
-        print(f"DEBUG: Response Text: {response.text}")
         data = response.json() # get the response from the api gateway
         if not data["success"] or not response.is_success:
             msg = data["message"] or data["error"] or "Login failed"

@@ -8,15 +8,15 @@ from textual.containers import Container, Horizontal, VerticalScroll
 from textual.screen import Screen
 from textual.widgets import Button, Footer, Static
 
-from models.login import Session
-from models.solver import JobConfig
-from screens.file_browser import FileBrowserScreen
-from screens.file_list import FileListScreen
-from screens.prompt_modal import PromptModal
-from screens.json_editor import JsonEditorScreen
+from shared.models.login import Session
+from shared.models.solver import JobConfig
+from tui.screens.file_browser import FileBrowserScreen
+from tui.screens.file_list import FileListScreen
+from tui.screens.prompt_modal import PromptModal
+from tui.screens.json_editor import JsonEditorScreen
 
 # add the validatiom
-from config_validator import convert_to_central_server_config
+from shared.config_transformation import convert_to_central_server_config
 
 
 class WelcomeScreen(Screen):
