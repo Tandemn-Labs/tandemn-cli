@@ -19,7 +19,7 @@ from textual.widgets import (
     Static,
 )
 
-from api import TandemnAPI, Cluster, LoginResponse, Session
+from shared.api import TandemnAPI, Cluster, LoginResponse, Session
 
 
 @dataclass

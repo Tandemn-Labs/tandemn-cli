@@ -1,5 +1,5 @@
-from models.api_gateway import BatchedRequest, vLLMSpecificConfig, SpeculativeConfig
-from models.solver import JobConfig
+from shared.models.api_gateway import BatchedRequest, vLLMSpecificConfig, SpeculativeConfig
+from shared.models.solver import JobConfig
 import requests
 
 def get_config_from_hf(model_name: str):

@@ -7,9 +7,9 @@ from textual import on
 from textual.app import App
 from textual.binding import Binding
 
-from api import TandemnAPI, Session
-from screens.login import LoginScreen
-from screens.welcome import WelcomeScreen
+from shared.api import TandemnAPI, Session
+from tui.screens.login import LoginScreen
+from tui.screens.welcome import WelcomeScreen
 # import logging
 
 # # Configure logging to write to a file
