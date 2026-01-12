@@ -36,7 +36,7 @@ from datetime import datetime
     type=str, required=False,
     help="This is an optional parameter and will be needed when we do batched inference. Please specify the local path of the file.")
 @click.option("--output-file", "-of",
-    type=str, required=False, default="./output",
+    type=str, required=False, default="output.txt",
     help="This is an optional parameter and will be needed when we do batched inference. Please specify the path of the output folder.")
 @click.option("--engine", "-e", 
     type=click.Choice(INFERENCE_ENGINES), required=False,
@@ -131,16 +131,15 @@ def submit(
     Just to validate the config, check for errors, and submit to the central orchestrator server. 
     """
     # check if there are stored credentials
-    # central_server_url, storage_server_url, api_key = get_stored_credentials()
-    # if not central_server_url or not storage_server_url or not api_key:
+    # base_url, api_key = get_stored_credentials()
+    # if not base_url or not api_key:
     #     click.echo("No stored credentials found, please run 'tandemn auth' to store your credentials")
     #     return
 
-    central_server_url = "https://0.0.0.0:8000"
-    storage_server_url = "https://0.0.0.0:8001"
-    click.echo(f"Found stored credentials, for the central server URL: {central_server_url} and storage server URL: {storage_server_url}")
+    base_url = "http://172.16.1.240:26336"
+    click.echo(f"Found stored credentials, for the server URL: {base_url}")
 
-    api = TandemnAPI(central_server_url=central_server_url, storage_server_url=storage_server_url)
+    api = TandemnAPI(base_url=base_url)
     click.echo(f" Validating the Configuration...Please wait...")
     
     # auto-detect some important stuff if not specified
@@ -239,25 +238,25 @@ def submit(
     if input_file and not dry_run:
         click.echo("🔄 Uploading input file to storage server...")
         remote_path = Path(input_file).name
-        presigned_response = asyncio.run(api.presign_upload(remote_path, user="demo_user"))
+        presigned_response = asyncio.run(api.presign_upload("s3://tandemn-user-data/"+remote_path, user="demo_user"))
        
         with open(input_file, "rb") as f:
             file_data = f.read()
-        asyncio.run(api.upload(presigned_response, file_data))
+        asyncio.run(api.upload_to_presigned_url(presigned_response, file_data))
         blob_storage_url = presigned_response['s3_uri']
         click.echo(f"Uploaded input file to storage server: {blob_storage_url}")
 
     # # now build the JobConfig and conver it to the Central Server Config
     # JobConfig = JobConfig(**job_config)
     click.echo("🔄 Building JobConfig...")
-    central_server_config = convert_to_central_server_config(job_config, user_id="demo_user", selected_file=blob_storage_url)
+    central_server_config = convert_to_central_server_config(job_config, user_id="demo_user", selected_file=blob_storage_url, output_file=output_file)
     click.echo("🔄 Converted JobConfig to Central Server Config...")
     central_server_config_dict = central_server_config.model_dump()
     click.echo("🔄 Sending Central Server Config to Central Server...")
     async def submit():
-        async with httpx.AsyncClient(timeout=200.0) as client:
+        async with httpx.AsyncClient(timeout=2000.0) as client:
             response = await client.post(
-                f"{central_server_url}/jobs/submit",  
+                f"{base_url}/submit/batch",
                 json=central_server_config_dict
             )
             response.raise_for_status()

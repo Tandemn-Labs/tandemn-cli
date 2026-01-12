@@ -48,7 +48,7 @@ def get_compatible_mtp_method(model_family: str):
     }
     return mtp_mapping.get(model_family)
 
-def convert_to_central_server_config(JobConfig: JobConfig, user_id: str, selected_file: str):
+def convert_to_central_server_config(JobConfig: JobConfig, user_id: str, selected_file: str, output_file: str):
     """
     this is to take all the inputs of the job_config, 
     welcome screen and then validate it, and then send it
@@ -73,8 +73,9 @@ def convert_to_central_server_config(JobConfig: JobConfig, user_id: str, selecte
                             slo_deadline_hours=JobConfig.slo.offline.deadline_hours,
                             placement=JobConfig.placement.sku_preferences)
     if selected_file:
-        central_server_config.selected_file = selected_file
-    
+        central_server_config.input_file = selected_file
+    if output_file:
+        central_server_config.output_file = output_file 
     # Step 2 - check if we can even get the config from the huggingface
     config = get_config_from_hf(central_server_config.model_name)
     if config is None:
