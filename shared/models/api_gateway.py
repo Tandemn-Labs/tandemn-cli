@@ -8,7 +8,7 @@ from pydantic import BaseModel
 class BatchedRequest(BaseModel):
     """Request to send batched inference job to central server."""
     user_id: str
-    selected_file: Optional[str] = None  # S3/local path to the file
+    input_file: Optional[str] = None  # S3/local path to the file
     output_file: Optional[str] = None  # local path to where the output will be saved
     # Get some parameters directly from the JobConfig
     description : str

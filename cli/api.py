@@ -6,23 +6,23 @@ from pydantic import ValidationError
 from fastapi import HTTPException
 import json
 
-# hardcode the ports for now
-CENTRAL_SERVER_PORT = 8000
-STORAGE_SERVER_PORT = 8001  
+# Both central and storage servers are on the same server now
+SERVER_BASE_URL = "http://172.16.1.240:26336"
 
 class TandemnAPI:
-    def __init__(self, central_server_url:str = "https://0.0.0.0:8000", storage_server_url:str = "https://0.0.0.0:8001") -> None: # replace it with the central server location
-        self.central_server_url = central_server_url
-        self.storage_server_url = storage_server_url
-        self.central_server_client = httpx.AsyncClient(base_url=self.central_server_url, timeout=200.0)
-        self.storage_server_client = httpx.AsyncClient(base_url=self.storage_server_url, timeout=200.0)
+    def __init__(self, base_url: str = SERVER_BASE_URL) -> None:
+        self.base_url = base_url
+        self.central_server_url = base_url
+        self.storage_server_url = base_url
+        self.central_server_client = httpx.AsyncClient(base_url=self.base_url, timeout=200.0)
+        self.storage_server_client = httpx.AsyncClient(base_url=self.base_url, timeout=200.0)
 
     async def presign_upload(self,  remote_path: str, expires: int = 600, user: str = "dummy_user"):
         """
         Get a presigned URL for single-file upload (<500MB).
         """
         response = await self.storage_server_client.post(
-            "/storage/presign/upload",
+            "/storage/presigned_upload",
             data={"remote_path": remote_path, "expires": expires, "user": user}
         )
         response.raise_for_status()
@@ -71,19 +71,37 @@ class TandemnAPI:
         response.raise_for_status()
         return response.json()
 
+    async def presign_download(self, remote_path: str, user: str = "dummy_user", expires: int = 600):
+        """
+        Get a presigned URL for downloading a file.
+        """
+        response = await self.storage_server_client.get(
+            "/storage/presigned_download",
+            params={"remote_path": remote_path, "user": user, "expires": expires}
+        )
+        response.raise_for_status()
+        return response.json()
+    
     async def download_file(self, remote_path: str, local_path: str, user: str = "dummy_user"):
+        """
+        Download a file using presigned URL.
+        """
         # Strip s3:// prefix and bucket, extract only the filename
         if remote_path.startswith("s3://"):
             # s3://bucket/users/user_xxx/filename.txt -> filename.txt
             remote_path = remote_path.split("/")[-1]
-            
-        async with self.storage_server_client.stream("GET",
-         f"/storage/download/{user}/{remote_path}"
-        ) as response:
-            response.raise_for_status()
-            with open(local_path, "wb") as f:
-                async for chunk in response.aiter_bytes(chunk_size=8192):
-                    f.write(chunk)
+        
+        # Get presigned URL
+        presigned_response = await self.presign_download(remote_path, user)
+        download_url = presigned_response.get('url')
+        
+        # Download using the presigned URL
+        async with httpx.AsyncClient(timeout=200.0) as client:
+            async with client.stream("GET", download_url) as response:
+                response.raise_for_status()
+                with open(local_path, "wb") as f:
+                    async for chunk in response.aiter_bytes(chunk_size=8192):
+                        f.write(chunk)
         
 
     async def delete_file(self, remote_path: str, user: str = "dummy_user"):
@@ -101,7 +119,7 @@ class TandemnAPI:
         response.raise_for_status()
         return response.json()
 
-    async def upload(self,presigned_response, file_data):
+    async def upload_to_presigned_url(self,presigned_response, file_data):
         async with httpx.AsyncClient(timeout=200.0) as client:
             response = await client.put(
                 presigned_response['url'],
@@ -132,7 +150,7 @@ class TandemnAPI:
             raise RuntimeError(f"Invalid response format: {str(e)}")
 
     async def submit_job(self, job_config: dict):
-        submit_endpoint = "/jobs/submit"
+        submit_endpoint = "/jobs/submit/batch"
         
         response = await self.central_server_client.post(
             submit_endpoint,
