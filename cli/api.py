@@ -7,7 +7,7 @@ from fastapi import HTTPException
 import json
 
 # Both central and storage servers are on the same server now
-SERVER_BASE_URL = "http://172.16.1.240:26336"
+SERVER_BASE_URL = "http://0.0.0.0:26336"
 
 class TandemnAPI:
     def __init__(self, base_url: str = SERVER_BASE_URL) -> None:
