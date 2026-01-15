@@ -13,7 +13,7 @@ from shared.models.solver import (
 )
 
 
-def build_job_config_from_cli_batched_vllm(
+def build_job_config_from_cli_vllm(
     # Core
     task: str,
     model: str,
