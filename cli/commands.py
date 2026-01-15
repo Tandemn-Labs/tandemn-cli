@@ -19,7 +19,7 @@ from cli.api import TandemnAPI
 from cli.auth import get_stored_credentials
 import httpx
 import asyncio
-from cli.config_builder import build_job_config_from_cli_batched_vllm
+from cli.config_builder import build_job_config_from_cli_vllm
 from shared.config_transformation import convert_to_central_server_config
 from pathlib import Path
 from datetime import datetime
@@ -94,7 +94,6 @@ from datetime import datetime
 @click.option('--prompt-lookup-max', type=int, help='[Speculative] Prompt lookup max (for ngram)')
 
 @click.option('--dry-run', is_flag=True, help='Validate config without submitting')
-
 def submit(
     # Required
     task: str,
@@ -125,7 +124,7 @@ def submit(
     draft_model: Optional[str],
     prompt_lookup_max: Optional[int],
     # Flags
-    dry_run: bool,
+    dry_run: bool
     ):
     """
     Just to validate the config, check for errors, and submit to the central orchestrator server. 
@@ -136,7 +135,7 @@ def submit(
     #     click.echo("No stored credentials found, please run 'tandemn auth' to store your credentials")
     #     return
 
-    base_url = "http://172.16.1.240:26336"
+    base_url = "http://0.0.0.0:26336"
     click.echo(f"Found stored credentials, for the server URL: {base_url}")
 
     api = TandemnAPI(base_url=base_url)
@@ -202,20 +201,19 @@ def submit(
         click.echo(f"   Task: {task}")
         click.echo(f"   Engine: {engine}")
         click.echo(f"   Model: {model}")
-        click.echo(f"   File: {input_file}")
-        click.echo(f"   Output File: {output_file}")
-        click.echo(f"   Priority: {priority}")
-        click.echo(f"   SLO: {slo_mode}" + (f" (deadline: {deadline}h)" if deadline else ""))
+        click.echo(f"   File: {input_file if input_file else 'None'}")
+        click.echo(f"   Output File: {output_file if output_file else 'None'}")
+        click.echo(f"   Priority: {priority if priority else 'auto'}")
+        click.echo(f"   SLO: {slo_mode if slo_mode else 'auto'}" + (f" (deadline: {deadline}h)" if deadline else ""))
         if engine == "vllm":
             click.echo(f"   Max Model Len: {max_model_len or 'auto'}")
             click.echo(f"   Max Num Seqs: {max_num_seqs or 'auto'}")
             if speculative_decode:
                 click.echo(f"   Speculative: {speculative_method or 'auto'}")
-        # return
     
     # ==================== Build the Job Config =====================
     click.echo("📦 Building job configuration...")
-    job_config = build_job_config_from_cli_batched_vllm(
+    job_config = build_job_config_from_cli_vllm(
         task=task,
         model=model,
         engine=engine,
@@ -230,13 +228,13 @@ def submit(
         max_model_len=max_model_len,
         max_num_seqs=max_num_seqs,
         max_batched_tokens=max_batched_tokens,
-        trust_remote_code=trust_remote_code,
+        trust_remote_code=trust_remote_code
     )
     click.echo("🔄 Applying defaults and validating with HuggingFace...")
     blob_storage_url = None
 
     if input_file and not dry_run:
-        click.echo("🔄 Uploading input file to storage server...")
+        click.echo("📂 Uploading input file to storage server...")
         remote_path = Path(input_file).name
         presigned_response = asyncio.run(api.presign_upload("s3://tandemn-user-data/"+remote_path, user="demo_user"))
        
@@ -246,25 +244,36 @@ def submit(
         blob_storage_url = presigned_response['s3_uri']
         click.echo(f"Uploaded input file to storage server: {blob_storage_url}")
 
-    # # now build the JobConfig and conver it to the Central Server Config
-    # JobConfig = JobConfig(**job_config)
+    # # now build the JobConfig and convert it to the Central Server Config
     click.echo("🔄 Building JobConfig...")
-    central_server_config = convert_to_central_server_config(job_config, user_id="demo_user", selected_file=blob_storage_url, output_file=output_file)
-    click.echo("🔄 Converted JobConfig to Central Server Config...")
+    central_server_config = convert_to_central_server_config(job_config,
+                            user_id="demo_user",
+                            input_file=blob_storage_url,
+                            output_file=output_file)
+    click.echo("📡 Converted JobConfig to Central Server Config...")
     central_server_config_dict = central_server_config.model_dump()
-    click.echo("🔄 Sending Central Server Config to Central Server...")
-    async def submit():
+    click.echo("🗄️ Sending Central Server Config to Central Server...")
+    
+    if not dry_run:
+        if task == "batched_inference":
+            url = f"{base_url}/submit/batch"
+        elif task == "online_serving":
+            url = f"{base_url}/submit/online"
+        else:
+            click.echo("Invalid task type", err=True)
+            return
+        result = asyncio.run(submit_request(url, central_server_config_dict))
+        click.echo(f"✅ Job submitted!")
+        click.echo(f"   Response: {result}")
+    else:
+        click.echo("📝 Dry run - would submit:")
+        click.echo(f"   Central Server Config: {central_server_config_dict}")
+
+async def submit_request(url: str, central_server_config_dict: dict):
         async with httpx.AsyncClient(timeout=2000.0) as client:
             response = await client.post(
-                f"{base_url}/submit/batch",
+                url,
                 json=central_server_config_dict
             )
             response.raise_for_status()
             return response.json()
-    if not dry_run:
-        result = asyncio.run(submit())
-        click.echo(f"✅ Job submitted!")
-        click.echo(f"   Response: {result}")
-    else:
-        click.echo("🔄 Dry run - would submit:")
-        click.echo(f"   Central Server Config: {central_server_config_dict}")
