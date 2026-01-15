@@ -1,6 +1,7 @@
-from shared.models.api_gateway import BatchedRequest, vLLMSpecificConfig, SpeculativeConfig
+from shared.models.api_gateway import BatchedRequest, vLLMSpecificConfig, SpeculativeConfig, OnlineServingRequest
 from shared.models.solver import JobConfig
 import requests
+from typing import Optional, Union
 
 def get_config_from_hf(model_name: str):
     config_url=f"https://huggingface.co/{model_name}/raw/main/config.json"
@@ -48,7 +49,11 @@ def get_compatible_mtp_method(model_family: str):
     }
     return mtp_mapping.get(model_family)
 
-def convert_to_central_server_config(JobConfig: JobConfig, user_id: str, selected_file: str, output_file: str):
+def convert_to_central_server_config(JobConfig: JobConfig,
+    user_id: str,
+    input_file: Optional[str] = None,
+    output_file: Optional[str] = None
+    ):
     """
     this is to take all the inputs of the job_config, 
     welcome screen and then validate it, and then send it
@@ -59,23 +64,38 @@ def convert_to_central_server_config(JobConfig: JobConfig, user_id: str, selecte
     # then we add stuff to modelSpecificConfig
 
     # Step 1 - Build the SendToCentralServerRequestBatched object
-    central_server_config = BatchedRequest(
-                            user_id=user_id,
-                            description=JobConfig.meta.description,
-                            task_type=JobConfig.task.type,
-                            task_priority=JobConfig.task.priority,
-                            model_name=JobConfig.model.model_name,
-                            engine=JobConfig.model.engine,
-                            quantization_bits=JobConfig.model.quantization.bits,
-                            is_speculative_decode=JobConfig.model.features.speculative_decode,
-                            is_PD_disaggregation=JobConfig.model.features.PD_disaggregation,
-                            slo_mode=JobConfig.slo.mode,
-                            slo_deadline_hours=JobConfig.slo.offline.deadline_hours,
-                            placement=JobConfig.placement.sku_preferences)
-    if selected_file:
-        central_server_config.input_file = selected_file
-    if output_file:
-        central_server_config.output_file = output_file 
+    if JobConfig.task.type == "batched_inference":
+        central_server_config = BatchedRequest(
+                                user_id=user_id,
+                                description=JobConfig.meta.description,
+                                task_type=JobConfig.task.type,
+                                task_priority=JobConfig.task.priority,
+                                model_name=JobConfig.model.model_name,
+                                engine=JobConfig.model.engine,
+                                quantization_bits=JobConfig.model.quantization.bits,
+                                is_speculative_decode=JobConfig.model.features.speculative_decode,
+                                is_PD_disaggregation=JobConfig.model.features.PD_disaggregation,
+                                slo_mode=JobConfig.slo.mode,
+                                slo_deadline_hours=JobConfig.slo.offline.deadline_hours,
+                                placement=JobConfig.placement.sku_preferences)
+    elif JobConfig.task.type == "online_serving":
+        central_server_config = OnlineServingRequest(
+                                user_id=user_id,
+                                description=JobConfig.meta.description,
+                                task_type=JobConfig.task.type,
+                                task_priority=JobConfig.task.priority,
+                                model_name=JobConfig.model.model_name,
+                                engine=JobConfig.model.engine,
+                                quantization_bits=JobConfig.model.quantization.bits,
+                                is_speculative_decode=JobConfig.model.features.speculative_decode,
+                                is_PD_disaggregation=JobConfig.model.features.PD_disaggregation,
+                                slo_mode=JobConfig.slo.mode,
+                                placement=JobConfig.placement.sku_preferences)
+    else:
+        raise Exception(f"Invalid task type: {JobConfig.task.type}")
+    if JobConfig.task.type == "batched_inference" and (input_file or output_file):
+        central_server_config.input_file = input_file
+        central_server_config.output_file = output_file
     # Step 2 - check if we can even get the config from the huggingface
     config = get_config_from_hf(central_server_config.model_name)
     if config is None:
@@ -115,7 +135,7 @@ def convert_to_central_server_config(JobConfig: JobConfig, user_id: str, selecte
             config_format=JobConfig.model.vllm_config.config_format,
             limit_mm_per_prompt=JobConfig.model.vllm_config.limit_mm_per_prompt,
         )
-        # step 5 - Combine everythingn
+        # step 5 - Combine everything
         central_server_config.vllm_specific_config = vllm_config
 
         # step 6 - Apply Good Defaults for Speculative Decoding
@@ -123,7 +143,7 @@ def convert_to_central_server_config(JobConfig: JobConfig, user_id: str, selecte
     return central_server_config
 
 
-def good_defaults(central_config: BatchedRequest, model_config: dict):
+def good_defaults(central_config: Union[BatchedRequest, OnlineServingRequest], model_config: dict):
     if central_config.is_speculative_decode != True:
         return central_config
     ########################################################
