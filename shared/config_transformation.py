@@ -92,7 +92,7 @@ def convert_to_central_server_config(JobConfig: JobConfig,
                                 slo_mode=JobConfig.slo.mode,
                                 placement=JobConfig.placement.sku_preferences)
     else:
-        raise Exception(f"Invalid task type: {JobConfig.task.type}")
+        raise ValueError(f"Invalid task type: {JobConfig.task.type}")
     if JobConfig.task.type == "batched_inference" and (input_file or output_file):
         central_server_config.input_file = input_file
         central_server_config.output_file = output_file
