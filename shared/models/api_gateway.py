@@ -10,6 +10,7 @@ class BatchedRequest(BaseModel):
     user_id: str
     input_file: Optional[str] = None  # S3/local path to the file
     output_file: Optional[str] = None  # local path to where the output will be saved
+    num_lines: Optional[int] = None  # number of prompt lines in the file
     # Get some parameters directly from the JobConfig
     description : str
     task_type : str

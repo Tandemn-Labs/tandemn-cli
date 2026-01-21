@@ -52,7 +52,8 @@ def get_compatible_mtp_method(model_family: str):
 def convert_to_central_server_config(JobConfig: JobConfig,
     user_id: str,
     input_file: Optional[str] = None,
-    output_file: Optional[str] = None
+    output_file: Optional[str] = None,
+    num_lines: Optional[int] = None,
     ):
     """
     this is to take all the inputs of the job_config, 
@@ -77,7 +78,8 @@ def convert_to_central_server_config(JobConfig: JobConfig,
                                 is_PD_disaggregation=JobConfig.model.features.PD_disaggregation,
                                 slo_mode=JobConfig.slo.mode,
                                 slo_deadline_hours=JobConfig.slo.offline.deadline_hours,
-                                placement=JobConfig.placement.sku_preferences)
+                                placement=JobConfig.placement.sku_preferences,
+                                num_lines=num_lines)
     elif JobConfig.task.type == "online_serving":
         central_server_config = OnlineServingRequest(
                                 user_id=user_id,
