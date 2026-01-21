@@ -232,14 +232,17 @@ def submit(
     )
     click.echo("🔄 Applying defaults and validating with HuggingFace...")
     blob_storage_url = None
-
+    num_lines = None
     if input_file and not dry_run:
         click.echo("📂 Uploading input file to storage server...")
         remote_path = Path(input_file).name
         presigned_response = asyncio.run(api.presign_upload("s3://tandemn-user-data/"+remote_path, user="demo_user"))
-       
+
+        # we still have to handle the case where the file is larger than 500MB (use multipart)
         with open(input_file, "rb") as f:
+            # read the file line by line and keep a track of the number of lines
             file_data = f.read()
+            num_lines = file_data.count(b'\n')
         asyncio.run(api.upload_to_presigned_url(presigned_response, file_data))
         blob_storage_url = presigned_response['s3_uri']
         click.echo(f"Uploaded input file to storage server: {blob_storage_url}")
@@ -248,11 +251,13 @@ def submit(
     click.echo("🔄 Building JobConfig...")
     central_server_config = convert_to_central_server_config(job_config,
                             user_id="demo_user",
-                            input_file=blob_storage_url,
-                            output_file=output_file)
+                            input_file=blob_storage_url if blob_storage_url else None,
+                            output_file=output_file,
+                            num_lines=num_lines if num_lines else None)
     click.echo("📡 Converted JobConfig to Central Server Config...")
+    click.echo(f"Total number of lines in the input file: {num_lines}")
     central_server_config_dict = central_server_config.model_dump()
-    click.echo("🗄️ Sending Central Server Config to Central Server...")
+    click.echo("🗄️ Waiting for the deployment to be ready in the central server...")
     
     if not dry_run:
         if task == "batched_inference":
@@ -262,18 +267,18 @@ def submit(
         else:
             click.echo("Invalid task type", err=True)
             return
-        result = asyncio.run(submit_request(url, central_server_config_dict))
+        result = submit_request(url, central_server_config_dict)
         click.echo(f"✅ Job submitted!")
         click.echo(f"   Response: {result}")
     else:
         click.echo("📝 Dry run - would submit:")
         click.echo(f"   Central Server Config: {central_server_config_dict}")
 
-async def submit_request(url: str, central_server_config_dict: dict):
-        async with httpx.AsyncClient(timeout=2000.0) as client:
-            response = await client.post(
-                url,
-                json=central_server_config_dict
-            )
-            response.raise_for_status()
-            return response.json()
+def submit_request(url: str, central_server_config_dict: dict):
+    with httpx.Client(timeout=2000.0) as client:
+        response = client.post(
+            url,
+            json=central_server_config_dict
+        )
+        response.raise_for_status()
+        return response.json()
