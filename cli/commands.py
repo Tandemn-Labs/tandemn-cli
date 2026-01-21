@@ -184,7 +184,7 @@ def submit(
         errors.append("You have selected an invalid engine for your task, this param is just for vllm")
 
     # if any speculative arguments are used and speculative decode is not enabled, enable it
-    if speculative_method or num_spec_tokens or draft_model or prompt_lookup_max and not speculative_decode:
+    if (speculative_method or num_spec_tokens or draft_model or prompt_lookup_max) and not speculative_decode:
         click.echo("   ⚠️  --speculative-method implies --speculative-decode, enabling it")
         speculative_decode = True
     
