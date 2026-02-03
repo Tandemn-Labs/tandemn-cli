@@ -21,8 +21,11 @@ import httpx
 import asyncio
 from cli.config_builder import build_job_config_from_cli_vllm
 from shared.config_transformation import convert_to_central_server_config
-from pathlib import Path
 from datetime import datetime
+import json
+import uuid
+
+MAX_LINES_PER_CHUNK = 200
 
 @click.command()
 # select the Task First
@@ -235,17 +238,20 @@ def submit(
     num_lines = None
     if input_file and not dry_run:
         click.echo("📂 Uploading input file to storage server...")
-        remote_path = Path(input_file).name
-        presigned_response = asyncio.run(api.presign_upload("s3://tandemn-user-data/"+remote_path, user="demo_user"))
-
-        # we still have to handle the case where the file is larger than 500MB (use multipart)
-        with open(input_file, "rb") as f:
-            # read the file line by line and keep a track of the number of lines
-            file_data = f.read()
-            num_lines = file_data.count(b'\n')
-        asyncio.run(api.upload_to_presigned_url(presigned_response, file_data))
-        blob_storage_url = presigned_response['s3_uri']
-        click.echo(f"Uploaded input file to storage server: {blob_storage_url}")
+        bucket_name = "tandemn-user-data"
+        user_name = "demo_user"
+        req_id = uuid.uuid4().hex
+        blob_storage_url, num_lines = asyncio.run(
+            upload_jsonl_chunks_to_storage_and_close(
+                api=api,
+                input_file=input_file,
+                bucket_name=bucket_name,
+                user_name=user_name,
+                req_id=req_id,
+                max_lines_per_chunk=MAX_LINES_PER_CHUNK,
+            )
+        )
+        click.echo(f"Uploaded input file chunks to: {blob_storage_url}")
 
     # # now build the JobConfig and convert it to the Central Server Config
     click.echo("🔄 Building JobConfig...")
@@ -273,6 +279,86 @@ def submit(
     else:
         click.echo("📝 Dry run - would submit:")
         click.echo(f"   Central Server Config: {central_server_config_dict}")
+
+
+
+def iter_jsonl_chunks(file_path: str, max_lines: int):
+    with open(file_path, "r", encoding="utf-8") as f:
+        chunk_lines = []
+        line_number = 0
+        for raw_line in f:
+            line_number += 1
+            stripped = raw_line.strip()
+            if not stripped:
+                continue
+            try:
+                json.loads(stripped)
+            except json.JSONDecodeError as exc:
+                raise click.ClickException(
+                    f"Invalid JSON on line {line_number}: {exc.msg}"
+                )
+            chunk_lines.append(stripped)
+            if len(chunk_lines) >= max_lines:
+                yield chunk_lines
+                chunk_lines = []
+        if chunk_lines:
+            yield chunk_lines
+
+
+async def upload_jsonl_chunks_to_storage(
+    api: TandemnAPI,
+    input_file: str,
+    bucket_name: str,
+    user_name: str,
+    req_id: str,
+    max_lines_per_chunk: int,
+):
+    total_lines = 0
+    chunk_index = 0
+
+    for chunk_lines in iter_jsonl_chunks(input_file, max_lines_per_chunk):
+        chunk_index += 1
+        total_lines += len(chunk_lines)
+
+        chunk_name = f"{chunk_index:06d}.jsonl"
+        remote_path = f"s3://{bucket_name}/{user_name}/{req_id}/{chunk_name}"
+
+        presigned_response = await api.presign_upload(remote_path, user=user_name)
+        chunk_payload = "\n".join(chunk_lines) + "\n"
+        await api.upload_to_presigned_url(
+            presigned_response, chunk_payload.encode("utf-8")
+        )
+        click.echo(f"Uploaded chunk {chunk_index}: {presigned_response['s3_uri']}")
+
+    if chunk_index == 0:
+        raise click.ClickException("Input file has no valid JSONL lines.")
+
+    blob_storage_url = f"s3://{bucket_name}/{user_name}/{req_id}/"
+    return blob_storage_url, total_lines
+
+
+async def upload_jsonl_chunks_to_storage_and_close(
+    api: TandemnAPI,
+    input_file: str,
+    bucket_name: str,
+    user_name: str,
+    req_id: str,
+    max_lines_per_chunk: int,
+):
+    try:
+        return await upload_jsonl_chunks_to_storage(
+            api=api,
+            input_file=input_file,
+            bucket_name=bucket_name,
+            user_name=user_name,
+            req_id=req_id,
+            max_lines_per_chunk=max_lines_per_chunk,
+        )
+    finally:
+        # await api.storage_server_client.aclose()
+        await api.central_server_client.aclose()
+
+
 
 def submit_request(url: str, central_server_config_dict: dict):
     with httpx.Client(timeout=2000.0) as client:
