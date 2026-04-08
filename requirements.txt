@@ -1,5 +1,0 @@
-click
-asyncio
-fastapi
-httpx
-requests

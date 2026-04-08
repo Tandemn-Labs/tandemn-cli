@@ -1,2 +1,0 @@
-# tandemn-cli
-tandemn cli
