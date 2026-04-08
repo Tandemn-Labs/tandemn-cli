@@ -1,0 +1,6 @@
+# Coding
+.codex
+
+# Build artifacts
+dist/
+__pycache__/
