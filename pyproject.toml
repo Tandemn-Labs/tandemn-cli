@@ -6,7 +6,7 @@ build-backend = "hatchling.build"
 name = "tandemn"
 version = "0.0.1"
 description = "CLI for Tandemn Inference Orchestration"
-requires-python = ">=3.10"
+requires-python = ">=3.12"
 dependencies = ["requests"]
 
 [project.scripts]
