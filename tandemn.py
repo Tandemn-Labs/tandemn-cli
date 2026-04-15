@@ -4,8 +4,7 @@ Tandemn CLI - Inference Orchestrator
 
 Thin HTTP client that talks to the Tandemn server.
 Set the following env vars:
-- TD_SERVER_ADDR: Server address
-- TD_SERVER_PORT: Server port
+- TD_SERVER_URL: Server URL (e.g. http://localhost:26336)
 
 Usage:
     tandemn deploy <model_name> <input_file> [options]
@@ -47,9 +46,7 @@ except ImportError:
     sys.exit(1)
 
 # ─── Config ──────────────────────────────────────────────────────────────────
-TD_SERVER_ADDR = os.environ.get("TD_SERVER_ADDR", "localhost")
-TD_SERVER_PORT = os.environ.get("TD_SERVER_PORT", "26336")
-TD_SERVER = f"http://{TD_SERVER_ADDR}:{TD_SERVER_PORT}"
+TD_SERVER = os.environ.get("TD_SERVER_URL", "http://localhost:26336")
 TD_API_KEY = os.environ.get("TD_API_KEY", "")
 
 # ─── ANSI helpers ────────────────────────────────────────────────────────────
@@ -2685,19 +2682,17 @@ def cmd_web(args):
 
 def cmd_check(args):
     """Check if the Tandemn server is reachable."""
-    import socket
-
     print(LOGO)
     header("SERVER CHECK")
     step(f"Pinging {c(TD_SERVER, CYAN + BOLD)}...")
     print()
 
     try:
-        with socket.create_connection((TD_SERVER_ADDR, int(TD_SERVER_PORT)), timeout=5):
-            step(f"{GREEN}Server is up.{RESET}")
-    except OSError:
+        requests.get(TD_SERVER, timeout=5)
+        step(f"{GREEN}Server is up.{RESET}")
+    except requests.exceptions.ConnectionError:
         step(f"{RED}Cannot reach server at {TD_SERVER}{RESET}")
-        step(f"{DIM}Check that TD_SERVER_ADDR and TD_SERVER_PORT are set correctly.{RESET}")
+        step(f"{DIM}Check that TD_SERVER_URL is set correctly.{RESET}")
     print()
 
 
@@ -2709,8 +2704,7 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Environment:
-  TD_SERVER_ADDR   Server address (default: localhost)
-  TD_SERVER_PORT   Server port (default: 26336)
+  TD_SERVER_URL    Server URL (default: http://localhost:26336)
   HF_TOKEN      HuggingFace token for gated models
 
 Examples:
