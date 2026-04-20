@@ -9,8 +9,15 @@ description = "CLI for Tandemn Inference Orchestration"
 requires-python = ">=3.12"
 dependencies = ["requests"]
 
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+
 [project.scripts]
 tandemn = "tandemn:main"
 
 [tool.hatch.build.targets.wheel]
 py-modules = ["tandemn"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "strict"

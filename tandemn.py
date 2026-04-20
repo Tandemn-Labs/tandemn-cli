@@ -48,6 +48,10 @@ except ImportError:
 # ─── Config ──────────────────────────────────────────────────────────────────
 TD_SERVER = os.environ.get("TD_SERVER_URL", "http://localhost:26336")
 TD_API_KEY = os.environ.get("TD_API_KEY", "")
+# Koi (optional smart placement recommender at a separate service URL). When set,
+# the CLI calls Koi /decide for placement recommendations in deploy; when unset,
+# falls back to Orca's in-server advisor (/test/placement?placement_solver=llm).
+KOI_SERVICE_URL = os.environ.get("KOI_SERVICE_URL", "")
 
 # ─── ANSI helpers ────────────────────────────────────────────────────────────
 BOLD = "\033[1m"
@@ -348,6 +352,79 @@ def _advisor_summary_lines(cfg):
     return lines
 
 
+# ─── Koi client (optional smart recommender at KOI_SERVICE_URL) ─────────────
+
+
+def fetch_resources():
+    """GET {TD_SERVER}/resources. Returns resource_map dict or None."""
+    url = f"{TD_SERVER}/resources"
+    headers = {}
+    if TD_API_KEY:
+        headers["Authorization"] = f"Bearer {TD_API_KEY}"
+    try:
+        resp = requests.get(url, timeout=10, headers=headers)
+        if resp.status_code == 200:
+            return resp.json()
+    except (requests.ConnectionError, requests.Timeout):
+        pass
+    except Exception:
+        pass
+    return None
+
+
+def _call_koi(koi_job, resource_map, timeout=600):
+    """POST to Koi /decide. Returns response JSON or None on failure."""
+    if not KOI_SERVICE_URL:
+        return None
+    try:
+        resp = requests.post(
+            f"{KOI_SERVICE_URL}/decide",
+            json={"job_request": koi_job, "resource_map": resource_map},
+            timeout=timeout,
+        )
+        if resp.status_code in (200, 201):
+            return resp.json()
+        return None
+    except (requests.ConnectionError, requests.Timeout):
+        return None
+    except Exception:
+        return None
+
+
+def _koi_summary_lines(koi_data):
+    """Format Koi /decide response as display lines for box()."""
+    rec = koi_data.get("config", {})
+    gpu = rec.get("gpu_type", "?")
+    tp = rec.get("tp", "?")
+    pp = rec.get("pp", "?")
+    dp = rec.get("dp", "?")
+    inst = rec.get("instance_type", "?")
+    lines = [
+        f"{DIM}Instance:{RESET}     {c(inst, WHITE + BOLD)}",
+        f"{DIM}GPU:{RESET}          {c(gpu, CYAN + BOLD)}",
+        f"{DIM}TP:{RESET}           {tp}    {DIM}PP:{RESET} {pp}    {DIM}DP:{RESET} {dp}",
+    ]
+    tps = koi_data.get("predicted_tps")
+    if tps:
+        lines.append(f"{DIM}Est. tput:{RESET}   {c(f'{tps:.0f}', GREEN)} tok/s")
+    cph = koi_data.get("predicted_cost_per_hour")
+    if cph:
+        lines.append(f"{DIM}Est. cost:{RESET}   ${cph:.2f}/hr")
+    rt = koi_data.get("predicted_runtime_hours")
+    if rt:
+        lines.append(f"{DIM}Est. time:{RESET}   {rt:.2f}h")
+    tc = koi_data.get("predicted_total_cost")
+    if tc:
+        lines.append(f"{DIM}Total cost:{RESET}  ${tc:.2f}")
+    conf = koi_data.get("confidence")
+    if conf is not None:
+        lines.append(f"{DIM}Confidence:{RESET}  {int(conf * 100)}%")
+    src = koi_data.get("data_source", "")
+    if src:
+        lines.append(f"{DIM}Source:{RESET}      {src}")
+    return lines
+
+
 # ─── Animated print helpers ─────────────────────────────────────────────────
 def step(msg, icon="▸"):
     print(f"  {CYAN}{icon}{RESET} {msg}")
@@ -529,6 +606,7 @@ def cmd_deploy(args):
         step(f"Uploaded to {c(s3_input_file, DIM)}")
 
     # Build common payload fields
+    preferred_market = "on_demand" if args.on_demand else "spot"
     payload = {
         "placement_solver": "user_specified" if args.gpu else "roofline",
         "user_id": "tandemn-cli",
@@ -547,6 +625,7 @@ def cmd_deploy(args):
         "s3_model_path": getattr(args, "s3_models", None),
         "persist": args.persist,
         "prefer_spot": not args.on_demand,
+        "preferred_market": preferred_market,
         "hf_token": os.environ.get("HF_TOKEN", ""),
         "log_level": args.log_level,
     }
@@ -576,155 +655,119 @@ def cmd_deploy(args):
     payload["chunks"] = chunk_infos
     payload["replicas"] = effective_replicas
 
-    # ── Phase 3: Solve placement (advisor + roofline in parallel) ───────
+    # ── Phase 3: Solve placement — tiered, no fallback to roofline ────────
+    # Priority: Koi (if KOI_SERVICE_URL set) > in-server advisor > --gpu/--no-advisor roofline
     print()
-    use_advisor = not args.gpu and not is_s3 and not args.no_advisor
+    use_koi = KOI_SERVICE_URL and not args.gpu and not is_s3
+    use_advisor = not use_koi and not args.gpu and not is_s3 and not args.no_advisor
+    koi_data = None
     advisor_configs = None
 
-    if use_advisor:
-        import threading as _thr
-
-        advisor_result = [None]
-
-        def _advisor_thread():
-            advisor_result[0] = _call_advisor(payload)
-
-        kt = _thr.Thread(target=_advisor_thread, daemon=True)
-        kt.start()
-
-        # Roofline in parallel (with spinner covering both)
-        plan_payload = {
-            k: v
-            for k, v in payload.items()
-            if k
-            not in (
-                "chunks",
-                "replicas",
-                "force",
-                "persist",
-                "prefer_spot",
-                "s3_model_path",
-                "hf_token",
-            )
+    if use_koi:
+        step("Running Koi placement solver...")
+        koi_job = {
+            "model_name": model_name,
+            "task_type": "batch",
+            "avg_input_tokens": stats["avg_input_tokens"],
+            "avg_output_tokens": avg_out,
+            "num_requests": stats["num_lines"],
+            "slo_deadline_hours": args.slo,
+            "objective": "cheapest",
+            "preferred_market": preferred_market,
         }
-        plan_payload["input_file"] = "s3://plan-dry-run/placeholder"
-        import threading as _thr2
+        rm = fetch_resources()
+        koi_data = _call_koi(koi_job, rm) if rm else None
 
-        _stop = _thr2.Event()
-        _spin = _thr2.Thread(
-            target=spinner,
-            args=("Solving placement (advisor + roofline)...", _stop),
-            daemon=True,
+        if koi_data is None:
+            print(f"\n  {RED}Koi unavailable — aborting.{RESET}")
+            print(f"  {DIM}Orca roofline is not used as a fallback when Koi is enabled.{RESET}")
+            print(f"  {DIM}To bypass Koi, re-run with --gpu <type> or unset KOI_SERVICE_URL.{RESET}\n")
+            sys.exit(1)
+
+        rec = koi_data.get("config", {})
+        print()
+        print(box(_koi_summary_lines(koi_data), title="KOI RECOMMENDATION"))
+        print()
+
+        if getattr(args, "skip_dangerously", False):
+            confirmed = True
+            step("--skip-dangerously: auto-confirming Koi recommendation")
+        else:
+            ans = input(
+                f"  {BOLD}Launch with Koi recommendation? [y/N]:{RESET} "
+            ).strip().lower()
+            confirmed = ans == "y"
+        if not confirmed:
+            print(f"\n  {DIM}Aborted.{RESET}")
+            sys.exit(0)
+
+        payload["placement_solver"] = "user_specified"
+        payload["gpu_type"] = rec.get("gpu_type")
+        payload["tp_size"] = rec.get("tp")
+        payload["pp_size"] = rec.get("pp")
+        payload["replicas"] = rec.get("dp", effective_replicas)
+        payload["planned_market"] = (
+            koi_data.get("planned_market") or rec.get("market") or preferred_market
         )
-        _spin.start()
-        try:
-            roofline_resp = api("post", "/test/placement", json=plan_payload)
-        finally:
-            kt.join(timeout=300)
-            _stop.set()
-            _spin.join(timeout=2)
-        advisor_configs = advisor_result[0]
+        payload["koi_decision_id"] = koi_data.get("_decision_id")
+        payload["koi_predicted_tps"] = koi_data.get("predicted_tps", 0)
+        alts = koi_data.get("alternatives", [])
+        if alts:
+            payload["koi_alternatives"] = alts
+        step(
+            f"Launching with Koi: {c(rec.get('gpu_type', '?'), CYAN)} "
+            f"TP={rec.get('tp')} PP={rec.get('pp')} DP={rec.get('dp')} "
+            f"market={payload['planned_market']}"
+        )
 
-        # Parse roofline result (drop fallback configs — model not supported by roofline)
-        roofline_configs = []
-        if roofline_resp.status_code in (200, 201):
-            rdata = roofline_resp.json()
-            if rdata.get("status") != "error":
-                roofline_configs = [
-                    c
-                    for c in (rdata.get("placements") or [])
-                    if not c.get("is_fallback")
-                ]
+    elif use_advisor:
+        step("Running LLM placement advisor...")
+        advisor_configs = _call_advisor(payload)
 
-        # Show both and let user choose
-        if advisor_configs and roofline_configs:
-            acfg = advisor_configs[0]
-            rcfg = roofline_configs[0]
-            print()
-            print(box(_advisor_summary_lines(acfg), title="[1] ADVISOR RECOMMENDATION"))
-            print()
-            roofline_lines = [
-                f"{DIM}Instance:{RESET}     {c(rcfg.get('instance_type', '?'), WHITE + BOLD)}",
-                f"{DIM}GPU:{RESET}          {c(rcfg.get('gpu_type', '?'), CYAN + BOLD)}",
-                f"{DIM}TP:{RESET}           {rcfg.get('tp_size', '?')}    {DIM}PP:{RESET} {rcfg.get('pp_size', '?')}",
-            ]
-            if rcfg.get("cost_per_hour"):
-                roofline_lines.append(
-                    f"{DIM}Est. cost:{RESET}   ${rcfg['cost_per_hour']:.2f}/hr"
-                )
-            slo = _slo_line(rcfg, args.slo)
-            if slo:
-                roofline_lines.append(slo)
-            print(box(roofline_lines, title="[2] ROOFLINE"))
-            print()
-            print(f"  {DIM}[3] Cancel{RESET}")
+        if not advisor_configs:
+            print(f"\n  {RED}Advisor unavailable — aborting.{RESET}")
+            print(f"  {DIM}Roofline is not used as a fallback when advisor is enabled.{RESET}")
+            print(f"  {DIM}To bypass, re-run with --no-advisor or --gpu <type>.{RESET}\n")
+            sys.exit(1)
 
-            if getattr(args, "skip_dangerously", False):
-                choice = "1"
-                step("--skip-dangerously: auto-picking advisor recommendation")
-            else:
-                choice = input(f"\n  {BOLD}Choice [1/2/3]:{RESET} ").strip()
+        acfg = advisor_configs[0]
+        print()
+        print(box(_advisor_summary_lines(acfg), title="ADVISOR RECOMMENDATION"))
+        print()
 
-            if choice == "1":
-                payload["placement_solver"] = "user_specified"
-                payload["gpu_type"] = acfg.get("gpu_type")
-                payload["tp_size"] = acfg.get("tp_size")
-                payload["pp_size"] = acfg.get("pp_size")
-                if acfg.get("max_model_len"):
-                    payload.setdefault("vllm_specific_config", {})["max_model_len"] = (
-                        acfg["max_model_len"]
-                    )
-                step(
-                    f"Launching with advisor: {c(acfg.get('gpu_type', '?'), CYAN)} TP={acfg.get('tp_size')} PP={acfg.get('pp_size')}"
-                )
-            elif choice == "2":
-                payload["placement_solver"] = "user_specified"
-                payload["gpu_type"] = rcfg.get("gpu_type")
-                if rcfg.get("tp_size"):
-                    payload["tp_size"] = rcfg["tp_size"]
-                if rcfg.get("pp_size"):
-                    payload["pp_size"] = rcfg["pp_size"]
-                step(f"Launching with roofline: {c(rcfg.get('gpu_type', '?'), CYAN)}")
-            else:
-                print(f"\n  {DIM}Aborted.{RESET}")
-                sys.exit(0)
-        elif advisor_configs and not roofline_configs:
-            acfg = advisor_configs[0]
-            print()
-            print(box(_advisor_summary_lines(acfg), title="[ADVISOR RECOMMENDATION]"))
-            print()
-            step(
-                f"{DIM}Roofline solver does not have a profile for this model — showing advisor only.{RESET}"
+        if getattr(args, "skip_dangerously", False):
+            confirmed = True
+            step("--skip-dangerously: auto-confirming advisor recommendation")
+        else:
+            ans = (
+                input(f"  {BOLD}Launch with advisor recommendation? [y/N]:{RESET} ")
+                .strip()
+                .lower()
             )
-            if getattr(args, "skip_dangerously", False):
-                confirmed = True
-                step("--skip-dangerously: auto-confirming advisor recommendation")
-            else:
-                ans = (
-                    input(f"  {BOLD}Launch with advisor recommendation? [y/N]:{RESET} ")
-                    .strip()
-                    .lower()
-                )
-                confirmed = ans == "y"
-            if not confirmed:
-                print(f"\n  {DIM}Aborted.{RESET}")
-                sys.exit(0)
-            payload["placement_solver"] = "user_specified"
-            payload["gpu_type"] = acfg.get("gpu_type")
-            payload["tp_size"] = acfg.get("tp_size")
-            payload["pp_size"] = acfg.get("pp_size")
-            if acfg.get("max_model_len"):
-                payload.setdefault("vllm_specific_config", {})["max_model_len"] = acfg[
-                    "max_model_len"
-                ]
-        # else: no advisor — fall through to normal roofline submit
+            confirmed = ans == "y"
+        if not confirmed:
+            print(f"\n  {DIM}Aborted.{RESET}")
+            sys.exit(0)
+
+        payload["placement_solver"] = "user_specified"
+        payload["gpu_type"] = acfg.get("gpu_type")
+        payload["tp_size"] = acfg.get("tp_size")
+        payload["pp_size"] = acfg.get("pp_size")
+        if acfg.get("max_model_len"):
+            payload.setdefault("vllm_specific_config", {})["max_model_len"] = acfg[
+                "max_model_len"
+            ]
+        step(
+            f"Launching with advisor: {c(acfg.get('gpu_type', '?'), CYAN)} "
+            f"TP={acfg.get('tp_size')} PP={acfg.get('pp_size')}"
+        )
 
     # ── Submit to server ─────────────────────────────────────────────
     if args.gpu:
         step(
             f"Running feasibility check: {c(args.gpu, CYAN)} TP={args.tp or 1} PP={args.pp or 1}..."
         )
-    elif not use_advisor:
+    elif not use_koi and not use_advisor:
         step("Submitting job...")
 
     resp = api_with_spinner(
@@ -1264,87 +1307,87 @@ def cmd_status(args):
 
 # TODO: CLI shouldn't have access to sky server. Maybe stream from sky server
 # running on the server machine? Or do through orca
-# def cmd_logs(args):
-#     """Stream logs from a running or completed job."""
-#     import sky
+def cmd_logs(args):
+    """Stream logs from a running or completed job."""
+    import sky
 
-#     print(LOGO)
-#     header("LOGS")
+    print(LOGO)
+    header("LOGS")
 
-#     cluster = args.cluster_id
-#     if not cluster:
-#         step("Fetching active clusters...")
-#         print()
-#         request_id = sky.status()
-#         clusters = sky.get(request_id)
-#         if clusters:
-#             for cl in clusters:
-#                 name = cl.get("name", "?")
-#                 status = cl.get("status", "?")
-#                 print(f"  {name}  ({status})")
-#         else:
-#             print(f"  {DIM}No active clusters.{RESET}")
-#         print(f"\n  {DIM}Run with cluster name to stream logs:{RESET}")
-#         print(f"  {WHITE}tandemn logs <cluster_name>{RESET}\n")
-#         return
+    cluster = args.cluster_id
+    if not cluster:
+        step("Fetching active clusters...")
+        print()
+        request_id = sky.status()
+        clusters = sky.get(request_id)
+        if clusters:
+            for cl in clusters:
+                name = cl.get("name", "?")
+                status = cl.get("status", "?")
+                print(f"  {name}  ({status})")
+        else:
+            print(f"  {DIM}No active clusters.{RESET}")
+        print(f"\n  {DIM}Run with cluster name to stream logs:{RESET}")
+        print(f"  {WHITE}tandemn logs <cluster_name>{RESET}\n")
+        return
 
-#     # For chunked jobs, the SkyPilot cluster is <job_id>-r0, not <job_id>.
-#     # Auto-discover replicas when the bare job_id doesn't match a cluster.
-#     try:
-#         request_id = sky.status(cluster_names=[cluster])
-#         matches = sky.get(request_id)
-#     except Exception:
-#         matches = []
+    # For chunked jobs, the SkyPilot cluster is <job_id>-r0, not <job_id>.
+    # Auto-discover replicas when the bare job_id doesn't match a cluster.
+    try:
+        request_id = sky.status(cluster_names=[cluster])
+        matches = sky.get(request_id)
+    except Exception:
+        matches = []
 
-#     if not matches:
-#         # Check if this is a chunked job with replica suffixes
-#         try:
-#             request_id = sky.status()
-#             all_clusters = sky.get(request_id) or []
-#             replicas = [
-#                 cl["name"]
-#                 for cl in all_clusters
-#                 if cl["name"].startswith(f"{cluster}-r")
-#             ]
-#         except Exception:
-#             replicas = []
+    if not matches:
+        # Check if this is a chunked job with replica suffixes
+        try:
+            request_id = sky.status()
+            all_clusters = sky.get(request_id) or []
+            replicas = [
+                cl["name"]
+                for cl in all_clusters
+                if cl["name"].startswith(f"{cluster}-r")
+            ]
+        except Exception:
+            replicas = []
 
-#         if not replicas:
-#             print(f"  {RED}Cluster '{cluster}' not found.{RESET}")
-#             print(f"  {DIM}Tip: use 'tandemn clusters' to list active clusters.{RESET}\n")
-#             return
+        if not replicas:
+            print(f"  {RED}Cluster '{cluster}' not found.{RESET}")
+            print(f"  {DIM}Tip: use 'tandemn clusters' to list active clusters.{RESET}\n")
+            return
 
-#         if len(replicas) == 1:
-#             cluster = replicas[0]
-#         else:
-#             print(f"  {DIM}Chunked job with {len(replicas)} replicas:{RESET}")
-#             for i, r in enumerate(sorted(replicas)):
-#                 print(f"    {c(str(i + 1), CYAN)}. {r}")
-#             try:
-#                 choice = input(
-#                     f"\n  {YELLOW}Which replica? [1-{len(replicas)}]:{RESET} "
-#                 ).strip()
-#                 idx = int(choice) - 1
-#                 cluster = sorted(replicas)[idx]
-#             except (ValueError, IndexError, EOFError):
-#                 cluster = sorted(replicas)[0]
-#                 print(f"  {DIM}Defaulting to {cluster}{RESET}")
+        if len(replicas) == 1:
+            cluster = replicas[0]
+        else:
+            print(f"  {DIM}Chunked job with {len(replicas)} replicas:{RESET}")
+            for i, r in enumerate(sorted(replicas)):
+                print(f"    {c(str(i + 1), CYAN)}. {r}")
+            try:
+                choice = input(
+                    f"\n  {YELLOW}Which replica? [1-{len(replicas)}]:{RESET} "
+                ).strip()
+                idx = int(choice) - 1
+                cluster = sorted(replicas)[idx]
+            except (ValueError, IndexError, EOFError):
+                cluster = sorted(replicas)[0]
+                print(f"  {DIM}Defaulting to {cluster}{RESET}")
 
-#     step(f"Streaming logs for: {c(cluster, CYAN + BOLD)}")
-#     print()
-#     try:
-#         sky.tail_logs(cluster_name=cluster, job_id=None, follow=True)
-#     except KeyboardInterrupt:
-#         print(f"\n\n  {DIM}Stopped streaming.{RESET}")
+    step(f"Streaming logs for: {c(cluster, CYAN + BOLD)}")
+    print()
+    try:
+        sky.tail_logs(cluster_name=cluster, job_id=None, follow=True)
+    except KeyboardInterrupt:
+        print(f"\n\n  {DIM}Stopped streaming.{RESET}")
 
 
-# def cmd_clusters(args):
-#     """Show active SkyPilot clusters."""
-#     print(LOGO)
-#     header("CLUSTERS")
-#     import subprocess as _sp
+def cmd_clusters(args):
+    """Show active SkyPilot clusters."""
+    print(LOGO)
+    header("CLUSTERS")
+    import subprocess as _sp
 
-#     _sp.run(["sky", "status"], check=False)
+    _sp.run(["sky", "status"], check=False)
 
 
 def cmd_swap(args):
@@ -1554,170 +1597,170 @@ def cmd_kill(args):
 
 
 # TODO: Move to Orca
-# def cmd_destroy(args):
-#     """Tear down Orca clusters, Redis state, and S3 uploads."""
+def cmd_destroy(args):
+    """Tear down Tandemn clusters, Redis state, and S3 uploads."""
 
-#     print(LOGO)
-#     header("DESTROY")
+    print(LOGO)
+    header("DESTROY")
 
-#     if not args.all and not args.job_id:
-#         print(f"\n  {DIM}Specify --all or a job_id.{RESET}\n")
-#         return
+    if not args.all and not args.job_id:
+        print(f"\n  {DIM}Specify --all or a job_id.{RESET}\n")
+        return
 
-#     # ── 1. Discover SkyPilot clusters ────────────────────────────────────
-#     step("Finding Tandemn clusters...")
-#     try:
-#         import sky as _sky
+    # ── 1. Discover SkyPilot clusters ────────────────────────────────────
+    step("Finding Tandemn clusters...")
+    try:
+        import sky as _sky
 
-#         _rid = _sky.status()
-#         _all_clusters = _sky.stream_and_get(_rid)
-#     except Exception as e:
-#         print(f"  {YELLOW}Warning:{RESET} Could not query SkyPilot: {e}")
-#         _all_clusters = []
+        _rid = _sky.status()
+        _all_clusters = _sky.stream_and_get(_rid)
+    except Exception as e:
+        print(f"  {YELLOW}Warning:{RESET} Could not query SkyPilot: {e}")
+        _all_clusters = []
 
-#     if args.all:
-#         orca_clusters = [
-#             c["name"] for c in _all_clusters if c.get("name", "").startswith("mo-")
-#         ]
-#     else:
-#         orca_clusters = [
-#             c["name"]
-#             for c in _all_clusters
-#             if c.get("name", "").startswith(args.job_id)
-#         ]
+    if args.all:
+        td_clusters = [
+            c["name"] for c in _all_clusters if c.get("name", "").startswith("mo-")
+        ]
+    else:
+        td_clusters = [
+            c["name"]
+            for c in _all_clusters
+            if c.get("name", "").startswith(args.job_id)
+        ]
 
-#     # ── 2. Discover Redis chunk keys ─────────────────────────────────────
-#     redis_keys = []
-#     redis_jobs = set()
-#     try:
-#         import redis as _redis
+    # ── 2. Discover Redis chunk keys ─────────────────────────────────────
+    redis_keys = []
+    redis_jobs = set()
+    try:
+        import redis as _redis
 
-#         r = _redis.from_url(
-#             os.environ.get("REDIS_URL", "redis://localhost:6379/0"),
-#             decode_responses=True,
-#         )
-#         r.ping()
-#         all_chunk_keys = r.keys("chunk:job:*")
-#         if args.all:
-#             redis_keys = all_chunk_keys
-#         else:
-#             redis_keys = [k for k in all_chunk_keys if args.job_id in k]
-#         # Extract unique job IDs
-#         for k in redis_keys:
-#             parts = k.split(":")
-#             if len(parts) >= 3:
-#                 redis_jobs.add(parts[2])
-#     except Exception as e:
-#         print(
-#             f"  {YELLOW}Warning:{RESET} Redis unreachable ({e}). Chunk/S3 cleanup skipped."
-#         )
+        r = _redis.from_url(
+            os.environ.get("REDIS_URL", "redis://localhost:6379/0"),
+            decode_responses=True,
+        )
+        r.ping()
+        all_chunk_keys = r.keys("chunk:job:*")
+        if args.all:
+            redis_keys = all_chunk_keys
+        else:
+            redis_keys = [k for k in all_chunk_keys if args.job_id in k]
+        # Extract unique job IDs
+        for k in redis_keys:
+            parts = k.split(":")
+            if len(parts) >= 3:
+                redis_jobs.add(parts[2])
+    except Exception as e:
+        print(
+            f"  {YELLOW}Warning:{RESET} Redis unreachable ({e}). Chunk/S3 cleanup skipped."
+        )
 
-#     # ── 3. Discover S3 paths from Redis chunk metadata ─────────────────
-#     s3_files = []  # individual S3 URIs to delete
-#     try:
-#         if redis_jobs and r:
-#             for jid in sorted(redis_jobs):
-#                 order_key = f"chunk:job:{jid}:output_order"
-#                 chunk_ids = r.lrange(order_key, 0, -1)
-#                 for cid in chunk_ids:
-#                     info = r.hgetall(f"chunk:job:{jid}:chunk:{cid}")
-#                     inp = info.get("s3_input_path", "")
-#                     out = info.get("s3_output_path", "")
-#                     if inp:
-#                         s3_files.append(inp)
-#                     if out:
-#                         s3_files.append(out)
-#                 # Also the assembled output.jsonl
-#                 meta = r.hgetall(f"chunk:job:{jid}:meta")
-#                 out_base = meta.get("s3_output_base", "")
-#                 if out_base:
-#                     s3_files.append(f"{out_base}/output.jsonl")
-#     except Exception:
-#         pass
+    # ── 3. Discover S3 paths from Redis chunk metadata ─────────────────
+    s3_files = []  # individual S3 URIs to delete
+    try:
+        if redis_jobs and r:
+            for jid in sorted(redis_jobs):
+                order_key = f"chunk:job:{jid}:output_order"
+                chunk_ids = r.lrange(order_key, 0, -1)
+                for cid in chunk_ids:
+                    info = r.hgetall(f"chunk:job:{jid}:chunk:{cid}")
+                    inp = info.get("s3_input_path", "")
+                    out = info.get("s3_output_path", "")
+                    if inp:
+                        s3_files.append(inp)
+                    if out:
+                        s3_files.append(out)
+                # Also the assembled output.jsonl
+                meta = r.hgetall(f"chunk:job:{jid}:meta")
+                out_base = meta.get("s3_output_base", "")
+                if out_base:
+                    s3_files.append(f"{out_base}/output.jsonl")
+    except Exception:
+        pass
 
-#     # ── 4. Show summary and confirm ──────────────────────────────────────
-#     total_items = len(orca_clusters) + (1 if redis_keys else 0) + len(s3_files)
-#     if total_items == 0:
-#         target = "Orca" if args.all else args.job_id
-#         print(f"\n  {DIM}Nothing to clean up for {target}.{RESET}\n")
-#         return
+    # ── 4. Show summary and confirm ──────────────────────────────────────
+    total_items = len(td_clusters) + (1 if redis_keys else 0) + len(s3_files)
+    if total_items == 0:
+        target = "Tandemn" if args.all else args.job_id
+        print(f"\n  {DIM}Nothing to clean up for {target}.{RESET}\n")
+        return
 
-#     print()
-#     if orca_clusters:
-#         print(f"  {BOLD}Clusters ({len(orca_clusters)}):{RESET}")
-#         for name in orca_clusters:
-#             print(f"    {DIM}-{RESET} {name}")
-#     if redis_keys:
-#         print(
-#             f"  {BOLD}Redis keys ({len(redis_keys)}):{RESET}  jobs: {', '.join(sorted(redis_jobs))}"
-#         )
-#     if s3_files:
-#         print(
-#             f"  {BOLD}S3 files ({len(s3_files)}):{RESET}  inputs + outputs for {', '.join(sorted(redis_jobs))}"
-#         )
-#     print()
+    print()
+    if td_clusters:
+        print(f"  {BOLD}Clusters ({len(td_clusters)}):{RESET}")
+        for name in td_clusters:
+            print(f"    {DIM}-{RESET} {name}")
+    if redis_keys:
+        print(
+            f"  {BOLD}Redis keys ({len(redis_keys)}):{RESET}  jobs: {', '.join(sorted(redis_jobs))}"
+        )
+    if s3_files:
+        print(
+            f"  {BOLD}S3 files ({len(s3_files)}):{RESET}  inputs + outputs for {', '.join(sorted(redis_jobs))}"
+        )
+    print()
 
-#     answer = (
-#         input(f"  {YELLOW}Destroy all of the above? [y/N]:{RESET} ").strip().lower()
-#     )
-#     if answer != "y":
-#         print(f"\n  {DIM}Aborted.{RESET}\n")
-#         return
+    answer = (
+        input(f"  {YELLOW}Destroy all of the above? [y/N]:{RESET} ").strip().lower()
+    )
+    if answer != "y":
+        print(f"\n  {DIM}Aborted.{RESET}\n")
+        return
 
-#     # ── 5. Execute ───────────────────────────────────────────────────────
-#     print()
+    # ── 5. Execute ───────────────────────────────────────────────────────
+    print()
 
-#     # Clusters
-#     for name in orca_clusters:
-#         step(f"Destroying cluster {c(name, CYAN)}...")
-#         try:
-#             _rid = _sky.down(name)
-#             _sky.stream_and_get(_rid)
-#         except Exception as e:
-#             print(f"  {YELLOW}Warning:{RESET} Failed to destroy {name}: {e}")
-#     if orca_clusters:
-#         step(f"Destroyed {len(orca_clusters)} cluster(s)", icon=f"{GREEN}✔{RESET}")
+    # Clusters
+    for name in td_clusters:
+        step(f"Destroying cluster {c(name, CYAN)}...")
+        try:
+            _rid = _sky.down(name)
+            _sky.stream_and_get(_rid)
+        except Exception as e:
+            print(f"  {YELLOW}Warning:{RESET} Failed to destroy {name}: {e}")
+    if td_clusters:
+        step(f"Destroyed {len(td_clusters)} cluster(s)", icon=f"{GREEN}✔{RESET}")
 
-#     # S3 — delete files via server's storage API
-#     if s3_files:
-#         step(f"Cleaning {len(s3_files)} S3 file(s) via server...")
-#         deleted = 0
-#         failed = 0
-#         for path in s3_files:
-#             try:
-#                 resp = api(
-#                     "delete",
-#                     "/storage/delete_s3",
-#                     params={"path": path, "user": "system"},
-#                     timeout=10,
-#                 )
-#                 if resp.status_code == 200:
-#                     deleted += 1
-#                 else:
-#                     failed += 1
-#             except Exception:
-#                 failed += 1
-#         msg = f"Deleted {deleted} S3 file(s)"
-#         if failed:
-#             msg += f"  {DIM}({failed} missing/already deleted){RESET}"
-#         step(msg, icon=f"{GREEN}✔{RESET}")
+    # S3 — delete files via server's storage API
+    if s3_files:
+        step(f"Cleaning {len(s3_files)} S3 file(s) via server...")
+        deleted = 0
+        failed = 0
+        for path in s3_files:
+            try:
+                resp = api(
+                    "delete",
+                    "/storage/delete_s3",
+                    params={"path": path, "user": "system"},
+                    timeout=10,
+                )
+                if resp.status_code == 200:
+                    deleted += 1
+                else:
+                    failed += 1
+            except Exception:
+                failed += 1
+        msg = f"Deleted {deleted} S3 file(s)"
+        if failed:
+            msg += f"  {DIM}({failed} missing/already deleted){RESET}"
+        step(msg, icon=f"{GREEN}✔{RESET}")
 
-#     # Redis — delete last (contains the S3 paths we just used)
-#     if redis_keys:
-#         step(f"Cleaning {len(redis_keys)} Redis keys...")
-#         try:
-#             pipe = r.pipeline()
-#             for k in redis_keys:
-#                 pipe.delete(k)
-#             pipe.execute()
-#             step(
-#                 f"Cleaned {len(redis_keys)} Redis keys ({len(redis_jobs)} job(s))",
-#                 icon=f"{GREEN}✔{RESET}",
-#             )
-#         except Exception as e:
-#             print(f"  {RED}Redis cleanup failed:{RESET} {e}")
+    # Redis — delete last (contains the S3 paths we just used)
+    if redis_keys:
+        step(f"Cleaning {len(redis_keys)} Redis keys...")
+        try:
+            pipe = r.pipeline()
+            for k in redis_keys:
+                pipe.delete(k)
+            pipe.execute()
+            step(
+                f"Cleaned {len(redis_keys)} Redis keys ({len(redis_jobs)} job(s))",
+                icon=f"{GREEN}✔{RESET}",
+            )
+        except Exception as e:
+            print(f"  {RED}Redis cleanup failed:{RESET} {e}")
 
-#     print()
+    print()
 
 
 def _render_snap(md, label):
@@ -2983,14 +3026,14 @@ Examples:
         "plan": cmd_plan,
         "progress": cmd_progress,
         "status": cmd_status,
-        # "logs": cmd_logs,
-        # "clusters": cmd_clusters,
+        "logs": cmd_logs,
+        "clusters": cmd_clusters,
         "metrics": cmd_metrics,
         "history": cmd_history,
         "inspect": cmd_inspect,
         "timeseries": cmd_timeseries,
         "stream": cmd_stream,
-        # "destroy": cmd_destroy,
+        "destroy": cmd_destroy,
         "add": cmd_add,
         "kill": cmd_kill,
         "swap": cmd_swap,
